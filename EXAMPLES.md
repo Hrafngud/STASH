@@ -72,6 +72,13 @@ Resolve middle C:
 stash -p C4
 ```
 
+Resolve an accidental and a note array:
+
+```bash
+stash -p Db4
+stash -p C4,E4,G4,C5
+```
+
 Resolve a major scale:
 
 ```bash
@@ -431,10 +438,10 @@ stash cpu.usage \
 ## 33. Network throughput as pitch
 
 ```bash
-stash net.enp4s0.rx \
-  --range 0..100M \
-  -w sine \
-  -m freq=80..2k/log~50ms
+  stash net.enp4s0.rx \
+    --range 0..100M \
+    -w sine \
+    -m freq=80..2k/log~50ms
 ```
 
 ## 34. Network throughput as pan
@@ -631,3 +638,241 @@ Unix input:
 while sleep .1; do printf '.5\n'; done |
 stash - --range 0..1 -m freq=100..2k
 ```
+
+## 45. Discover RAM and disk I/O sources
+
+RAM source names are stable:
+
+```bash
+stash -l ram
+stash -i ram.used
+stash -i ram.free
+```
+
+Disk source names include the kernel device name, so discover the names on the
+current machine before copying an I/O example:
+
+```bash
+stash -l io
+stash -i io.nvme0n1.read
+```
+
+Replace `nvme0n1` below when `stash -l io` reports a different device.
+
+## 46. Read RAM telemetry
+
+Used memory in bytes:
+
+```bash
+stash ram.used
+```
+
+Readily available memory in bytes:
+
+```bash
+stash ram.free
+```
+
+Both sources have a detected natural range from zero to total physical RAM.
+
+## 47. RAM usage as a triangle drone
+
+```bash
+stash ram.used \
+  -w tri \
+  -m freq=55..660/log~1s \
+  -m gain=.03..0.18
+```
+
+Used RAM controls pitch and loudness. No `--range` is needed because STASH
+detects the machine's total memory.
+
+## 48. Low-memory warning notes
+
+Hold a low note while available RAM remains below 2 GB:
+
+```bash
+stash ram.free \
+  -t below:2G \
+  -n C2 \
+  -d 500ms \
+  -a 5ms,40ms,.8,250ms
+```
+
+Play one note only when available RAM crosses downward through 2 GB:
+
+```bash
+stash ram.free \
+  -t fall:2G \
+  -n C2 \
+  -d 500ms
+```
+
+Together with the `above` and `rise` CPU examples, these commands cover all
+four trigger forms.
+
+## 49. RAM as filtered noise
+
+```bash
+stash ram.used \
+  -w noise \
+  -m gain=.01..0.12~500ms \
+  -f hp:120 \
+  -f lp:4k
+```
+
+This also demonstrates the `noise` waveform; the RAM drone above demonstrates
+`tri`. The earlier examples cover `sine`, `square`, and `saw`.
+
+## 50. Read disk I/O telemetry
+
+Read and write throughput are emitted in bytes per second. Operations are
+emitted in operations per second:
+
+```bash
+stash io.nvme0n1.read
+stash io.nvme0n1.write
+stash io.nvme0n1.ops
+```
+
+## 51. Disk reads as pitch
+
+Rate sources do not have a fixed natural maximum, so I/O mappings need an
+explicit range chosen for the machine and workload:
+
+```bash
+stash io.nvme0n1.read \
+  --range 0..1G \
+  -w sine \
+  -m freq=70..2k/log~100ms
+```
+
+Values below or above the input range clamp to the ends of the pitch mapping.
+
+## 52. Disk writes open a filter
+
+```bash
+stash io.nvme0n1.write \
+  --range 0..1G \
+  -w saw \
+  -m freq=55..440/log~100ms \
+  -f lp:300,.8 \
+  -m filter.cutoff=300..8k/log~150ms
+```
+
+The same write-throughput control drives both oscillator frequency and
+low-pass cutoff.
+
+## 53. Disk operation bursts as notes
+
+```bash
+stash io.nvme0n1.ops \
+  -t rise:1k \
+  -n C3 \
+  -d 80ms \
+  -w noise \
+  -f lp:1k
+```
+
+This emits one short noise burst when disk activity crosses upward through
+1,000 operations per second. Trigger thresholds use source values directly,
+so this example does not need `--range`.
+
+## 54. Inspect every hardware source family
+
+CPU sources include aggregate, individual-core, vector, and optional hardware
+metrics:
+
+```bash
+stash cpu.core.0.usage
+stash cpu.core.0.freq
+stash cpu.cores.freq
+stash cpu.power
+```
+
+GPU metrics are hardware-dependent and remain discoverable as unavailable
+when the local driver cannot provide them:
+
+```bash
+stash gpu.usage
+stash gpu.freq
+stash gpu.temp
+stash gpu.power
+stash gpu.vram
+```
+
+Network interfaces expose byte and packet rates in both directions:
+
+```bash
+stash net.enp4s0.rx
+stash net.enp4s0.tx
+stash net.enp4s0.rx.packets
+stash net.enp4s0.tx.packets
+```
+
+Use `stash -l cpu`, `stash -l gpu`, and `stash -l net` to see what is present
+on the current machine and replace example interface names.
+
+## 55. Gate, hit, and step rhythm controls
+
+Use the rhythm gate as the oscillator gate and the hit pulse to accent drive:
+
+```bash
+stash ram.used \
+  -w tri \
+  -m freq=80..800/log~200ms \
+  -r rhythm:120:1/8:x-x-x-x- \
+  -m rhythm.gate:gate=0..1 \
+  -x drive:.1 \
+  -m rhythm.hit:drive.amount=.05..0.8
+```
+
+Use the zero-based rhythm step to change filter resonance across the pattern:
+
+```bash
+stash ram.used \
+  -w saw \
+  -m freq=80..600/log \
+  -r rhythm:100:1/8:x-x---x- \
+  -f lp:2k,.7 \
+  -m rhythm.step:filter.q=.5..8
+```
+
+The earlier rhythm examples cover `rhythm.phase` and `rhythm.velocity`; the
+filter example covers `rhythm.gate`. These commands add explicit `gate`,
+`rhythm.hit`, and `rhythm.step` mappings.
+
+## 56. Modulate every effect parameter
+
+```bash
+stash ram.used \
+  -w saw \
+  -m freq=80..800/log~200ms \
+  -f lp:2k,.7 \
+  -m ram.free:filter.q=.5..8 \
+  -x delay:150ms,.2,.2 \
+  -m cpu.usage:delay.time=.04..0.4 \
+  -m cpu.usage:delay.mix=.05..0.7 \
+  -x drive:.15 \
+  -m cpu.usage:drive.amount=.05..0.7
+```
+
+Along with the earlier `filter.cutoff` and `delay.feedback` examples, this
+covers every modulatable filter, delay, and drive parameter. Unindexed effect
+targets bind to the most recently declared matching effect.
+
+## 57. Capability coverage index
+
+| Capability | Examples |
+| --- | --- |
+| Source families: CPU, GPU, RAM, network, disk I/O, stdin | 1, 33-39, 45-54 |
+| Scalar, individual-core, and vector telemetry | 1-2, 12-16, 54 |
+| Notes, note arrays, scales, modes, rhythms | 3, 12-21 |
+| Waveforms: sine, square, saw, triangle, noise | 4, 7-8, 47, 49 |
+| Mapping curves, smoothing, ranges, and multiple controls | 4, 9, 25, 33-36, 47, 51-52 |
+| Frequency, gain, pan, and gate targets | 4, 11, 32, 47, 55 |
+| Above, below, rise, and fall triggers; gate duration; ADSR | 12, 15-16, 48, 53 |
+| Tempo, swing, and all five rhythm controls | 17-21, 30-32, 55 |
+| Low/high-pass, Q, delay, drive, ordering, and effect modulation | 22-30, 36, 49, 52, 55-56 |
+| Telemetry stdout, shell pipelines, device audio, and raw PCM | 1, 4-44 |
+| Listing, prefix discovery, inspection, and primitive resolution | 2-3, 45, 54 |

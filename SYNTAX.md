@@ -171,7 +171,6 @@ gpu.vram
 
 ram.used
 ram.free
-ram.pressure
 
 net.enp4s0.rx
 net.enp4s0.tx
