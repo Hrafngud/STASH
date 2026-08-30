@@ -1,0 +1,27 @@
+# Build and test output
+/bin/
+/stash
+/stash.exe
+*.test
+coverage.out
+*.coverprofile
+
+# Generated audio
+*.pcm
+
+# Local tools and editors
+/.agents/
+/.codex/
+/AGENT.md
+/TASKS.md
+/PLANNING.md
+/.idea/
+/.vscode/
+*.swp
+*~
+
+/codex-loop.sh
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
