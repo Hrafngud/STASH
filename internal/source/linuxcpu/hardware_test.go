@@ -170,6 +170,91 @@ func TestRegisterHardwareRecordsExplicitUnavailableStates(t *testing.T) {
 	}
 }
 
+func TestCPUPowerUsesPackageEnergyDeltasAndWraps(t *testing.T) {
+	t.Parallel()
+	const zone0 = sysPowercapPath + "/intel-rapl:0"
+	const zone1 = sysPowercapPath + "/intel-rapl:1"
+	filesystem := fstest.MapFS{
+		zone0 + "/name":                                         &fstest.MapFile{Data: []byte("package-0\n")},
+		zone0 + "/energy_uj":                                    &fstest.MapFile{Data: []byte("9000000\n")},
+		zone0 + "/max_energy_range_uj":                          &fstest.MapFile{Data: []byte("10000000\n")},
+		zone1 + "/name":                                         &fstest.MapFile{Data: []byte("package-1\n")},
+		zone1 + "/energy_uj":                                    &fstest.MapFile{Data: []byte("2000000\n")},
+		zone1 + "/max_energy_range_uj":                          &fstest.MapFile{Data: []byte("10000000\n")},
+		sysPowercapPath + "/intel-rapl:0:0/name":                &fstest.MapFile{Data: []byte("core\n")},
+		sysPowercapPath + "/intel-rapl:0:0/energy_uj":           &fstest.MapFile{Data: []byte("9999999\n")},
+		sysPowercapPath + "/intel-rapl:0:0/max_energy_range_uj": &fstest.MapFile{Data: []byte("10000000\n")},
+	}
+	start := time.Unix(100, 0)
+	times := []time.Time{start, start.Add(2 * time.Second)}
+	nextTime := func() time.Time {
+		when := times[0]
+		times = times[1:]
+		return when
+	}
+	registry := source.NewRegistry()
+	if err := RegisterHardware(context.Background(), registry, filesystem, nextTime); err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := registry.Lookup(PowerName)
+	if !entry.Available || entry.Info.Unit != "W" {
+		t.Fatalf("power entry = %#v", entry)
+	}
+	collector, err := registry.NewCollector(context.Background(), PowerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filesystem[zone0+"/energy_uj"].Data = []byte("1000000\n")
+	filesystem[zone1+"/energy_uj"].Data = []byte("6000000\n")
+	sample, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scalar := sample.(source.ScalarSample)
+	// zone0 wrapped for 2 J and zone1 advanced 4 J over two seconds.
+	if scalar.Value != 3 || scalar.Time != start.Add(2*time.Second) {
+		t.Fatalf("power sample = %#v, want 3 W", scalar)
+	}
+}
+
+func TestCPUPowerMalformedAndRuntimeFailuresNeverFabricateSamples(t *testing.T) {
+	t.Parallel()
+	const zone = sysPowercapPath + "/intel-rapl:0"
+	malformed := fstest.MapFS{
+		zone + "/name":                &fstest.MapFile{Data: []byte("package-0\n")},
+		zone + "/energy_uj":           &fstest.MapFile{Data: []byte("unknown\n")},
+		zone + "/max_energy_range_uj": &fstest.MapFile{Data: []byte("10000000\n")},
+	}
+	registry := source.NewRegistry()
+	if err := RegisterHardware(context.Background(), registry, malformed, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := registry.Lookup(PowerName)
+	if entry.Available || !strings.Contains(entry.UnavailableReason, "invalid microjoule") {
+		t.Fatalf("malformed power entry = %#v", entry)
+	}
+
+	valid := fstest.MapFS{
+		zone + "/name":                &fstest.MapFile{Data: []byte("package-0\n")},
+		zone + "/energy_uj":           &fstest.MapFile{Data: []byte("100\n")},
+		zone + "/max_energy_range_uj": &fstest.MapFile{Data: []byte("1000\n")},
+	}
+	times := []time.Time{time.Unix(1, 0), time.Unix(2, 0)}
+	now := func() time.Time { when := times[0]; times = times[1:]; return when }
+	registry = source.NewRegistry()
+	if err := RegisterHardware(context.Background(), registry, valid, now); err != nil {
+		t.Fatal(err)
+	}
+	collector, err := registry.NewCollector(context.Background(), PowerName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid[zone+"/energy_uj"].Data = []byte("1001\n")
+	if sample, err := collector.Collect(context.Background()); sample != nil || err == nil || !strings.Contains(err.Error(), "exceeds range") {
+		t.Fatalf("out-of-range power Collect = (%#v, %v)", sample, err)
+	}
+}
+
 func TestMalformedHardwareDataNeverProducesSources(t *testing.T) {
 	t.Parallel()
 	registry := source.NewRegistry()

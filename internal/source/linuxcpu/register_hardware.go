@@ -18,10 +18,10 @@ const (
 	PowerName              = "cpu.power"
 )
 
-const unavailablePowerReason = "no reliable local CPU energy or power interface implemented"
+const unavailablePowerReason = "no readable CPU package energy counter"
 
-// RegisterDefaultHardware detects Linux CPU frequency and temperature through
-// sysfs and explicitly records CPU power as unavailable.
+// RegisterDefaultHardware detects Linux CPU frequency, temperature, and power
+// through stable local sysfs interfaces.
 func RegisterDefaultHardware(ctx context.Context, registry *source.Registry) error {
 	return RegisterHardware(ctx, registry, os.DirFS("/"), time.Now)
 }
@@ -48,6 +48,10 @@ func RegisterHardware(ctx context.Context, registry *source.Registry, filesystem
 	if isContextError(temperatureErr) {
 		return fmt.Errorf("register CPU hardware sources: %w", temperatureErr)
 	}
+	power, powerErr := detectPower(ctx, filesystem)
+	if isContextError(powerErr) {
+		return fmt.Errorf("register CPU hardware sources: %w", powerErr)
+	}
 
 	if err := registerFrequency(registry, filesystem, now, frequency, frequencyErr); err != nil {
 		return err
@@ -55,10 +59,21 @@ func RegisterHardware(ctx context.Context, registry *source.Registry, filesystem
 	if err := registerTemperature(registry, filesystem, now, temperature, temperatureErr); err != nil {
 		return err
 	}
-	if err := registry.RegisterUnavailable(powerInfo(), unavailablePowerReason); err != nil {
+	if err := registerPower(registry, filesystem, now, power, powerErr); err != nil {
 		return err
 	}
 	return nil
+}
+
+func registerPower(registry *source.Registry, filesystem fs.FS, now func() time.Time, probe powerProbe, detectionErr error) error {
+	if detectionErr != nil {
+		return registry.RegisterUnavailable(powerInfo(), detectionErr.Error())
+	}
+	zones := append([]powerZone(nil), probe.zones...)
+	factory := func(factoryContext context.Context) (source.Collector, error) {
+		return newPowerCollector(factoryContext, filesystem, zones, now)
+	}
+	return registry.RegisterAvailable(powerInfo(), factory)
 }
 
 func registerFrequency(registry *source.Registry, filesystem fs.FS, now func() time.Time, probe frequencyProbe, detectionErr error) error {

@@ -39,6 +39,52 @@ type Target struct {
 	EffectIndex int
 }
 
+// Value reads the current numeric value for a bound target. Delay time is
+// exposed in seconds, matching Set and the public modulation grammar.
+func (target Target) Value(model Model, voiceIndex int) (float64, error) {
+	if target.EffectIndex < 0 {
+		if voiceIndex < 0 || voiceIndex >= len(model.Voices) {
+			return 0, fmt.Errorf("voice index %d out of range", voiceIndex)
+		}
+		voice := model.Voices[voiceIndex]
+		switch target.Name {
+		case "freq":
+			return voice.Frequency, nil
+		case "gain":
+			return voice.Gain, nil
+		case "pan":
+			return voice.Pan, nil
+		case "gate":
+			return voice.Gate, nil
+		default:
+			return 0, fmt.Errorf("target %s is not a voice target", target.Name)
+		}
+	}
+	if target.EffectIndex >= len(model.Effects) {
+		return 0, fmt.Errorf("effect index %d out of range", target.EffectIndex)
+	}
+	effect := model.Effects[target.EffectIndex]
+	if !targetMatchesEffect(target.Name, effect.Kind) {
+		return 0, fmt.Errorf("target %s does not match effect %d kind %s", target.Name, target.EffectIndex, effect.Kind)
+	}
+	switch target.Name {
+	case "filter.cutoff":
+		return effect.Cutoff, nil
+	case "filter.q":
+		return effect.Q, nil
+	case "delay.time":
+		return effect.DelayTime.Seconds(), nil
+	case "delay.feedback":
+		return effect.Feedback, nil
+	case "delay.mix":
+		return effect.Mix, nil
+	case "drive.amount":
+		return effect.Amount, nil
+	default:
+		return 0, fmt.Errorf("target %s is not an effect target", target.Name)
+	}
+}
+
 // ResolveTarget resolves a public numeric target. An effect target binds to
 // the most recently declared matching effect, as required by the CLI contract.
 func ResolveTarget(effects []Effect, name string) (Target, error) {

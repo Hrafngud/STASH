@@ -135,3 +135,40 @@ func TestTargetSetUpdatesBoundVoiceAndEffect(t *testing.T) {
 		t.Fatalf("mismatched target error = %v", err)
 	}
 }
+
+func TestTargetValueReadsVoiceAndEffectState(t *testing.T) {
+	t.Parallel()
+	model := sound.Model{Voices: []sound.Voice{sound.DefaultVoice()}, Effects: targetEffects()}
+	tests := []struct {
+		name string
+		want float64
+	}{
+		{name: "freq", want: 440},
+		{name: "gain", want: .1},
+		{name: "pan", want: 0},
+		{name: "gate", want: 1},
+		{name: "filter.cutoff", want: 80},
+		{name: "filter.q", want: .8},
+		{name: "drive.amount", want: .1},
+		{name: "delay.time", want: .2},
+		{name: "delay.feedback", want: .4},
+		{name: "delay.mix", want: .5},
+	}
+	for _, test := range tests {
+		target, err := sound.ResolveTarget(model.Effects, test.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := target.Value(model, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != test.want {
+			t.Errorf("%s value = %v, want %v", test.name, got, test.want)
+		}
+	}
+	frequency, _ := sound.ResolveTarget(model.Effects, "freq")
+	if _, err := frequency.Value(model, 1); err == nil {
+		t.Fatal("out-of-range voice read succeeded")
+	}
+}
