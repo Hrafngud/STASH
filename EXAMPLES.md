@@ -276,11 +276,12 @@ stash cpu.usage \
 stash cpu.cores.usage \
   -b 110 \
   -r rhythm:1/16:xxxxxxxxxxxxxxxx \
+  -t above:95 \
   -n scale:C3:pentatonic-minor:12 \
   -d 80ms
 ```
 
-At each rhythmic step STASH observes the per-core activity and maps active vector positions into the scale.
+At each rhythmic hit STASH observes the per-core activity and maps positions above 95% into the scale.
 
 ## 20. Sparse rhythm
 
@@ -335,6 +336,7 @@ Effect/filter order is the declaration order.
 
 ```bash
 stash cpu.usage \
+  --range cpu.temp=30..90 \
   -w saw \
   -m freq=80..1200/exp~100ms \
   -f lp:2k \
@@ -463,6 +465,7 @@ Network receive throughput controls gain.
 
 ```bash
 stash cpu.usage \
+  --range cpu.temp=30..90 \
   -w saw \
   -m freq=80..1200/exp~100ms \
   -f lp:2k \
@@ -482,7 +485,10 @@ printf '0\n0.25\n0.5\n0.75\n1\n'
 Sonify it:
 
 ```bash
-printf '0\n0.25\n0.5\n0.75\n1\n' |
+for value in 0 0.25 0.5 0.75 1; do
+  printf '%s\n' "$value"
+  sleep .15
+done |
 stash - \
   --range 0..1 \
   -w sine \
@@ -504,7 +510,7 @@ stash - \
 
 ```bash
 stash cpu.usage |
-awk '{print $1 / 100}' |
+awk '{print $1 / 100; fflush()}' |
 stash - \
   --range 0..1 \
   -m freq=80..2k/exp
@@ -521,9 +527,11 @@ stash cpu.usage \
   -o - |
 pw-cat \
   --playback \
+  --raw \
   --rate 48000 \
   --channels 2 \
-  --format f32
+  --format f32 \
+  -
 ```
 
 ## 41. Raw PCM to a file
@@ -620,5 +628,6 @@ stash cpu.usage -w saw -m freq=80..1k -f lp:2k
 Unix input:
 
 ```bash
-producer | stash - --range 0..1 -m freq=100..2k
+while sleep .1; do printf '.5\n'; done |
+stash - --range 0..1 -m freq=100..2k
 ```
