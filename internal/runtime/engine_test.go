@@ -42,6 +42,29 @@ type blockingCollector struct {
 	once  bool
 }
 
+type pushCollector struct {
+	first   source.Sample
+	once    bool
+	samples chan source.Sample
+}
+
+func newPushCollector(first source.Sample) *pushCollector {
+	return &pushCollector{first: first, samples: make(chan source.Sample, 4)}
+}
+
+func (collector *pushCollector) Collect(ctx context.Context) (source.Sample, error) {
+	if !collector.once {
+		collector.once = true
+		return collector.first, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case sample := <-collector.samples:
+		return sample, nil
+	}
+}
+
 func (collector *blockingCollector) Collect(ctx context.Context) (source.Sample, error) {
 	if !collector.once {
 		collector.once = true
@@ -352,6 +375,30 @@ func (clock *manualClock) waitForTimers(t *testing.T) {
 	t.Fatal("timed out waiting for a manual clock timer")
 }
 
+func waitForUpdates(t *testing.T, session *fakeSession, condition func([]audio.Update) bool) []audio.Update {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		updates := session.snapshot()
+		if condition(updates) {
+			return updates
+		}
+		time.Sleep(time.Millisecond)
+	}
+	updates := session.snapshot()
+	t.Fatalf("timed out waiting for backend updates: %#v", updates)
+	return nil
+}
+
+func advanceClock(t *testing.T, clock *manualClock, duration time.Duration) {
+	t.Helper()
+	for elapsed := time.Duration(0); elapsed < duration; elapsed += 5 * time.Millisecond {
+		clock.waitForTimers(t)
+		clock.advance(5 * time.Millisecond)
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestPreflightWaitsForPolledSourceCadence(t *testing.T) {
 	origin := time.Unix(49, 0)
 	clock := &manualClock{now: origin}
@@ -440,6 +487,94 @@ func TestRhythmControlsUseInjectedClockAndCancellation(t *testing.T) {
 			t.Fatalf("rhythm phase update not observed: %#v", updates)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestRhythmClockedVectorTriggerUsesLatestTelemetryOnlyOnHits(t *testing.T) {
+	origin := time.Unix(55, 0)
+	clock := &manualClock{now: origin}
+	collector := newPushCollector(source.VectorSample{Values: []float64{96, 20, 99}, Time: origin})
+	registry := source.NewRegistry()
+	registerCollector(t, registry, rangedInfo("cpu.cores.usage", source.KindVector), collector)
+	backend := newFakeBackend()
+	plan := buildPlan(t, registry,
+		"cpu.cores.usage",
+		"-b", "600",
+		"-r", "rhythm:1/8:x-",
+		"-t", "above:95",
+		"-n", "C4,E4,G4",
+		"-d", "150ms",
+		"-m", "freq=100..200",
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	engine := immediateEngine(registry, backend)
+	engine.Clock = clock
+	engine.RhythmInterval = 5 * time.Millisecond
+	go func() { result <- engine.Run(ctx, plan) }()
+
+	select {
+	case <-backend.started:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("backend did not start")
+	}
+	if got := backend.config.Model.Voices; len(got) != 3 || got[0].Gate != 1 || got[1].Gate != 0 || got[2].Gate != 1 {
+		cancel()
+		t.Fatalf("initial rhythm-selected gates = %#v, want [1 0 1]", got)
+	}
+
+	collector.samples <- source.VectorSample{Values: []float64{10, 98, 20}, Time: origin.Add(25 * time.Millisecond)}
+	waitForUpdates(t, backend.session, func(updates []audio.Update) bool {
+		count := 0
+		for _, update := range updates {
+			if update.Target.Name == "freq" {
+				count++
+			}
+		}
+		return count >= 3
+	})
+	marker := len(backend.session.snapshot())
+
+	// The rest step closes the initial notes even though their 150 ms gate
+	// duration has not elapsed. The changed vector does not gate voice 1 yet.
+	advanceClock(t, clock, 50*time.Millisecond)
+	waitForUpdates(t, backend.session, func(updates []audio.Update) bool {
+		closed := [3]bool{}
+		for _, update := range updates[marker:] {
+			if update.Target.Name == "gate" && update.Value == 0 {
+				closed[update.VoiceIndex] = true
+			}
+		}
+		return closed[0] && closed[2]
+	})
+	for _, update := range backend.session.snapshot()[marker:] {
+		if update.Target.Name == "gate" && update.VoiceIndex == 1 && update.Value == 1 {
+			cancel()
+			t.Fatalf("voice 1 gated on a rest or between hits: %#v", backend.session.snapshot()[marker:])
+		}
+	}
+
+	marker = len(backend.session.snapshot())
+	advanceClock(t, clock, 50*time.Millisecond)
+	waitForUpdates(t, backend.session, func(updates []audio.Update) bool {
+		for _, update := range updates[marker:] {
+			if update.Target.Name == "gate" && update.VoiceIndex == 1 && update.Value == 1 {
+				return true
+			}
+		}
+		return false
+	})
+	for _, update := range backend.session.snapshot()[marker:] {
+		if update.Target.Name == "gate" && update.Value == 1 && update.VoiceIndex != 1 {
+			cancel()
+			t.Fatalf("inactive vector index gated on the second hit: %#v", backend.session.snapshot()[marker:])
+		}
+	}
+
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
 }
 

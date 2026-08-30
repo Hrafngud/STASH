@@ -32,6 +32,7 @@ type metricProbe struct {
 	path              string
 	kind              metricKind
 	maximum           uint64
+	read              func() (float64, error)
 	unavailableReason string
 }
 
@@ -254,10 +255,22 @@ type gpuCollector struct {
 }
 
 func (collector *gpuCollector) Collect(ctx context.Context) (source.Sample, error) {
-	if err := checkInputs(ctx, collector.filesystem); err != nil {
+	if ctx == nil {
+		return nil, fmt.Errorf("context is nil")
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	value, err := readMetric(collector.filesystem, collector.metric)
+	var value float64
+	var err error
+	if collector.metric.read != nil {
+		value, err = collector.metric.read()
+	} else {
+		if collector.filesystem == nil {
+			return nil, fmt.Errorf("collect %s: GPU filesystem is nil", collector.name)
+		}
+		value, err = readMetric(collector.filesystem, collector.metric)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("collect %s: %w", collector.name, err)
 	}

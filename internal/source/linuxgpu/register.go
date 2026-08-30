@@ -34,14 +34,19 @@ var sourceDefinitions = []sourceDefinition{
 	{VRAMName, "B", metricVRAM, func(probe gpuProbe) metricProbe { return probe.vram }},
 }
 
-// RegisterDefault detects optional GPU telemetry from local Linux sysfs APIs.
+// RegisterDefault detects optional GPU telemetry from local Linux sysfs APIs
+// and, when no AMDGPU device is selected, a runtime-loaded NVIDIA NVML API.
 func RegisterDefault(ctx context.Context, registry *source.Registry) error {
-	return Register(ctx, registry, os.DirFS("/"), time.Now)
+	return registerWithNVML(ctx, registry, os.DirFS("/"), time.Now, loadDynamicNVML)
 }
 
 // Register performs runtime feature detection with injected filesystem and
 // clock dependencies so tests never require GPU hardware or vendor libraries.
 func Register(ctx context.Context, registry *source.Registry, filesystem fs.FS, now func() time.Time) error {
+	return registerWithNVML(ctx, registry, filesystem, now, nil)
+}
+
+func registerWithNVML(ctx context.Context, registry *source.Registry, filesystem fs.FS, now func() time.Time, load nvmlLoader) error {
 	if registry == nil {
 		return fmt.Errorf("register Linux GPU sources: registry is nil")
 	}
@@ -55,6 +60,16 @@ func Register(ctx context.Context, registry *source.Registry, filesystem fs.FS, 
 	probe, detectionErr := detectGPU(ctx, filesystem)
 	if errors.Is(detectionErr, context.Canceled) || errors.Is(detectionErr, context.DeadlineExceeded) {
 		return fmt.Errorf("register Linux GPU sources: %w", detectionErr)
+	}
+	if detectionErr != nil && load != nil {
+		amdErr := detectionErr
+		probe, detectionErr = detectNVIDIA(ctx, load)
+		if errors.Is(detectionErr, context.Canceled) || errors.Is(detectionErr, context.DeadlineExceeded) {
+			return fmt.Errorf("register Linux GPU sources: %w", detectionErr)
+		}
+		if detectionErr != nil {
+			detectionErr = fmt.Errorf("%v; NVIDIA backend unavailable: %w", amdErr, detectionErr)
+		}
 	}
 	for _, definition := range sourceDefinitions {
 		metric := definition.metric(probe)

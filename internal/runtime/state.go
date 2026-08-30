@@ -25,6 +25,7 @@ type controlState struct {
 	trigger       *triggerBinding
 	rhythmClock   *primitive.RhythmClock
 	rhythmOrigin  time.Time
+	latestPrimary []float64
 	gateValues    []float64
 	gateGen       []uint64
 }
@@ -49,10 +50,11 @@ func newControlState(plan cli.Plan, model sound.Model, prepared map[string]*prep
 		return nil, fmt.Errorf("plan has %d modulations but %d resolved targets", len(plan.Command.Modulations), len(plan.SoundTargets))
 	}
 	state := &controlState{
-		plan:       plan,
-		model:      model,
-		gateValues: make([]float64, len(model.Voices)),
-		gateGen:    make([]uint64, len(model.Voices)),
+		plan:          plan,
+		model:         model,
+		latestPrimary: append([]float64(nil), prepared[plan.Command.Source].values...),
+		gateValues:    make([]float64, len(model.Voices)),
+		gateGen:       make([]uint64, len(model.Voices)),
 	}
 	for index := range model.Voices {
 		state.gateValues[index] = model.Voices[index].Gate
@@ -133,7 +135,7 @@ func (state *controlState) applyInitial(prepared map[string]*preparedSource, ord
 		if err := state.applyMappings(name, item.values, item.at); err != nil {
 			return err
 		}
-		if name == state.plan.Command.Source && state.trigger != nil {
+		if name == state.plan.Command.Source && state.trigger != nil && !state.rhythmVectorTrigger() {
 			active, err := state.evaluateTrigger(item.values)
 			if err != nil {
 				return err
@@ -151,7 +153,7 @@ func (state *controlState) applyInitial(prepared map[string]*preparedSource, ord
 		if err != nil {
 			return err
 		}
-		if err := state.applyRhythm(controls, state.rhythmOrigin); err != nil {
+		if _, err := state.applyRhythm(controls, state.rhythmOrigin); err != nil {
 			return err
 		}
 	}
@@ -279,15 +281,59 @@ func (state *controlState) evaluateTrigger(values []float64) ([]int, error) {
 	return indices, nil
 }
 
-func (state *controlState) applyRhythm(controls primitive.RhythmControls, at time.Time) error {
+func (state *controlState) applyRhythm(controls primitive.RhythmControls, at time.Time) ([]int, error) {
+	var activated []int
 	// Apply rhythm's inherent articulation first. Explicit modulation bindings
 	// are evaluated afterward so a named rhythm control remains authoritative
 	// when the user routes it to gate, frequency, or an effect target.
-	if state.trigger == nil {
+	if state.rhythmVectorTrigger() {
+		if controls.Hit == 1 {
+			indices, err := state.evaluateTrigger(state.latestPrimary)
+			if err != nil {
+				return nil, err
+			}
+			selected := make([]bool, len(state.model.Voices))
+			for _, index := range indices {
+				selected[index] = true
+			}
+			for index := range state.model.Voices {
+				if selected[index] {
+					state.gateGen[index]++
+					// A zero-to-one transition retriggers the persistent voice even
+					// when the preceding note's gate duration overlaps this hit.
+					if state.gateValues[index] != 0 {
+						if err := state.setGate(index, 0); err != nil {
+							return nil, err
+						}
+					}
+					if err := state.setGate(index, 1); err != nil {
+						return nil, err
+					}
+					activated = append(activated, index)
+				} else if state.gateValues[index] != 0 {
+					state.gateGen[index]++
+					if err := state.setGate(index, 0); err != nil {
+						return nil, err
+					}
+				}
+			}
+		} else if controls.Gate == 0 {
+			// Rest steps end any note whose configured gate duration extends
+			// beyond the hit step, without creating a new trigger evaluation.
+			for index := range state.model.Voices {
+				if state.gateValues[index] != 0 {
+					state.gateGen[index]++
+					if err := state.setGate(index, 0); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	} else if state.trigger == nil {
 		for index := range state.model.Voices {
 			if state.gateValues[index] != controls.Gate {
 				if err := state.setGate(index, controls.Gate); err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
@@ -295,7 +341,7 @@ func (state *controlState) applyRhythm(controls primitive.RhythmControls, at tim
 	if controls.Hit == 1 && state.plan.SourceEntry.Info.Kind == source.KindScalar && len(state.plan.Command.Notes) > 1 {
 		note := state.plan.Command.Notes[controls.Step%len(state.plan.Command.Notes)]
 		if err := state.update(sound.Target{Name: "freq", EffectIndex: -1}, 0, note.Frequency()); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -311,10 +357,14 @@ func (state *controlState) applyRhythm(controls primitive.RhythmControls, at tim
 	}
 	for _, item := range values {
 		if err := state.applyMappings(item.name, []float64{item.value}, at); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return activated, nil
+}
+
+func (state *controlState) rhythmVectorTrigger() bool {
+	return state.trigger != nil && state.rhythmClock != nil && state.plan.SourceEntry.Info.Kind == source.KindVector
 }
 
 func (state *controlState) setGate(index int, value float64) error {
@@ -370,7 +420,10 @@ func (state *controlState) run(ctx context.Context, clock Clock, events chan run
 				if err := state.applyMappings(event.name, event.values, event.at); err != nil {
 					return err
 				}
-				if event.name == state.plan.Command.Source && state.trigger != nil {
+				if event.name == state.plan.Command.Source {
+					state.latestPrimary = append(state.latestPrimary[:0], event.values...)
+				}
+				if event.name == state.plan.Command.Source && state.trigger != nil && !state.rhythmVectorTrigger() {
 					active, err := state.evaluateTrigger(event.values)
 					if err != nil {
 						return err
@@ -391,8 +444,12 @@ func (state *controlState) run(ctx context.Context, clock Clock, events chan run
 				if err != nil {
 					return err
 				}
-				if err := state.applyRhythm(controls, event.at); err != nil {
+				activated, err := state.applyRhythm(controls, event.at)
+				if err != nil {
 					return err
+				}
+				for _, index := range activated {
+					scheduleGate(ctx, clock, state.plan.GateDuration, index, state.gateGen[index], events)
 				}
 			case eventGateOff:
 				if event.voiceIndex >= 0 && event.voiceIndex < len(state.gateGen) && state.gateGen[event.voiceIndex] == event.generation {
