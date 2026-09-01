@@ -119,8 +119,8 @@ func BuildPlan(command Command, registry *source.Registry) (Plan, error) {
 			return Plan{}, fmt.Errorf("control %s has no natural range; provide --range for it", controlName)
 		}
 	}
-	if command.RangeOverride != nil {
-		controlName := command.RangeOverride.Control
+	for _, override := range command.RangeOverrides {
+		controlName := override.Control
 		if controlName == "" {
 			controlName = command.Source
 		}
@@ -141,7 +141,7 @@ func BuildPlan(command Command, registry *source.Registry) (Plan, error) {
 
 func activatesAudio(command Command) bool {
 	return command.Waveform != nil || len(command.Modulations) > 0 ||
-		command.RangeOverride != nil || command.Gain != nil || command.Trigger != nil ||
+		len(command.RangeOverrides) > 0 || command.Gain != nil || command.Trigger != nil ||
 		command.Notes != nil || command.Rhythm != nil || command.BPM != nil ||
 		command.GateDuration != nil || command.Envelope != nil || command.Swing != nil ||
 		len(command.Ordered) > 0 || command.Output != nil
@@ -184,14 +184,16 @@ func validateControl(registry *source.Registry, name string, hasRhythm bool) (so
 }
 
 func hasRangeOverride(command Command, controlName string) bool {
-	if command.RangeOverride == nil {
-		return false
+	for _, override := range command.RangeOverrides {
+		overrideControl := override.Control
+		if overrideControl == "" {
+			overrideControl = command.Source
+		}
+		if overrideControl == controlName {
+			return true
+		}
 	}
-	overrideControl := command.RangeOverride.Control
-	if overrideControl == "" {
-		overrideControl = command.Source
-	}
-	return overrideControl == controlName
+	return false
 }
 
 func resolvePrimitive(input string) (PrimitiveResolution, error) {

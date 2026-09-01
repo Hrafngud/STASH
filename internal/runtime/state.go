@@ -99,7 +99,7 @@ func newControlState(plan cli.Plan, model sound.Model, prepared map[string]*prep
 }
 
 func (state *controlState) inputRange(name string, prepared map[string]*preparedSource) (unit.Range, error) {
-	if override := state.plan.Command.RangeOverride; override != nil {
+	for _, override := range state.plan.Command.RangeOverrides {
 		overrideName := override.Control
 		if overrideName == "" {
 			overrideName = state.plan.Command.Source

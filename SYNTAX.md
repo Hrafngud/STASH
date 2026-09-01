@@ -81,7 +81,7 @@ A user may quote arguments voluntarily, but quoting is not required for valid ca
 -o TARGET                    select audio output
 ```
 
-Repeated `-m`, `-f`, and `-x` options are allowed.
+Repeated `-m`, `--range`, `-f`, and `-x` options are allowed.
 
 Repeated effects preserve command-line order.
 
@@ -429,7 +429,16 @@ Example:
 --range net.enp4s0.rx=0..100M
 ```
 
-A range override replaces the source's natural range for mapping normalization.
+Range overrides replace their controls' natural ranges for mapping normalization.
+`--range` may be repeated to override several controls independently:
+
+```bash
+stash cpu.usage \
+  --range cpu.temp=35..90 \
+  --range net.enp4s0.rx=0..100M \
+  -m cpu.temp:gain=0..1 \
+  -m net.enp4s0.rx:freq=80..2k/log
+```
 
 ## 14. Waveforms
 

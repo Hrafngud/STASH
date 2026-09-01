@@ -78,7 +78,7 @@ func Parse(args []string) (Command, error) {
 		if err != nil {
 			return Command{}, err
 		}
-		if option != "-m" && option != "-f" && option != "-x" {
+		if option != "-m" && option != "--range" && option != "-f" && option != "-x" {
 			if seen[option] {
 				return Command{}, fmt.Errorf("duplicate option %s", option)
 			}
@@ -104,7 +104,7 @@ func Parse(args []string) (Command, error) {
 			if err != nil {
 				return Command{}, err
 			}
-			command.RangeOverride = &override
+			command.RangeOverrides = append(command.RangeOverrides, override)
 		case "-v":
 			gain, err := parseBoundedNumber("gain", value, 0, 1)
 			if err != nil {

@@ -92,9 +92,9 @@ func TestParseEverySourceOptionAndRetainsRepeatableOrder(t *testing.T) {
 	if command.Swing == nil || *command.Swing != 58 {
 		t.Fatalf("swing = %v", command.Swing)
 	}
-	if command.RangeOverride == nil || command.RangeOverride.Control != "" ||
-		command.RangeOverride.Range.Min != 0 || command.RangeOverride.Range.Max != 100 {
-		t.Fatalf("range override = %#v", command.RangeOverride)
+	if len(command.RangeOverrides) != 1 || command.RangeOverrides[0].Control != "" ||
+		command.RangeOverrides[0].Range.Min != 0 || command.RangeOverrides[0].Range.Max != 100 {
+		t.Fatalf("range overrides = %#v", command.RangeOverrides)
 	}
 	if command.Output == nil || *command.Output != "-" {
 		t.Fatalf("output = %v", command.Output)
@@ -131,14 +131,16 @@ func TestParseExplicitRangeAndModulationControls(t *testing.T) {
 	t.Parallel()
 	command, err := cli.Parse([]string{
 		"cpu.usage",
+		"--range", "cpu.temp=35..90",
 		"--range", "net.enp4s0.rx=0..100M",
 		"-m", "net.enp4s0.rx:filter.cutoff=300..8k/log~50ms",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := command.RangeOverride.Control; got != "net.enp4s0.rx" {
-		t.Fatalf("range control = %q", got)
+	if len(command.RangeOverrides) != 2 || command.RangeOverrides[0].Control != "cpu.temp" ||
+		command.RangeOverrides[1].Control != "net.enp4s0.rx" {
+		t.Fatalf("range overrides = %#v", command.RangeOverrides)
 	}
 	modulation := command.Modulations[0]
 	if modulation.Control != "net.enp4s0.rx" || modulation.Target != "filter.cutoff" ||
@@ -206,7 +208,7 @@ func TestParseRejectsMalformedArgv(t *testing.T) {
 func TestParseRejectsDuplicateSingletonOptions(t *testing.T) {
 	t.Parallel()
 	values := map[string]string{
-		"-w": "sine", "--range": "0..1", "-v": ".2", "-t": "above:.5",
+		"-w": "sine", "-v": ".2", "-t": "above:.5",
 		"-n": "C4", "-r": "rhythm:120:1/8:x-", "-b": "120", "-d": "100ms",
 		"-a": "5ms,20ms,.8,50ms", "--swing": "50", "-o": "-",
 	}
@@ -222,15 +224,19 @@ func TestParseRejectsDuplicateSingletonOptions(t *testing.T) {
 	}
 }
 
-func TestParseAllowsRepeatedModulationFilterAndEffect(t *testing.T) {
+func TestParseAllowsRepeatedModulationRangeFilterAndEffect(t *testing.T) {
 	t.Parallel()
-	_, err := cli.Parse([]string{
+	command, err := cli.Parse([]string{
 		"cpu.usage",
 		"-m", "freq=1..2", "-m", "gain=.1..1",
+		"--range", "cpu.temp=35..90", "--range", "net.enp4s0.rx=0..100M",
 		"-f", "lp:1k", "-f", "hp:80",
 		"-x", "drive:.2", "-x", "delay:1ms,.1,.2",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(command.RangeOverrides) != 2 {
+		t.Fatalf("range override count = %d, want 2", len(command.RangeOverrides))
 	}
 }

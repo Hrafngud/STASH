@@ -78,19 +78,19 @@ type Command struct {
 	InspectSource string
 	Primitive     string
 
-	Waveform      *Waveform
-	Modulations   []Modulation
-	RangeOverride *RangeOverride
-	Gain          *float64
-	Trigger       *control.Trigger
-	Notes         []primitive.Note
-	Rhythm        *primitive.Rhythm
-	BPM           *float64
-	GateDuration  *time.Duration
-	Envelope      *ADSR
-	Swing         *float64
-	Output        *string
-	Effects       []sound.Effect
+	Waveform       *Waveform
+	Modulations    []Modulation
+	RangeOverrides []RangeOverride
+	Gain           *float64
+	Trigger        *control.Trigger
+	Notes          []primitive.Note
+	Rhythm         *primitive.Rhythm
+	BPM            *float64
+	GateDuration   *time.Duration
+	Envelope       *ADSR
+	Swing          *float64
+	Output         *string
+	Effects        []sound.Effect
 
 	// Ordered retains repeatable option argv order for diagnostics and later
 	// runtime routing. Effects contains the same -f/-x declarations as one

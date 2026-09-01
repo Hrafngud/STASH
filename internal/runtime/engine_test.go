@@ -320,6 +320,34 @@ func TestRangeOverrideReplacesNaturalNormalization(t *testing.T) {
 	}
 }
 
+func TestMultipleRangeOverridesNormalizeIndependentControls(t *testing.T) {
+	t.Parallel()
+	registry := source.NewRegistry()
+	primary := &blockingCollector{first: source.ScalarSample{Value: 1, Time: time.Unix(46, 0)}}
+	secondary := &sequenceCollector{samples: []source.Sample{
+		source.ScalarSample{Value: 1, Time: time.Unix(46, 0)},
+	}, err: errors.New("sensor disappeared")}
+	registerCollector(t, registry, rangedInfo("primary", source.KindScalar), primary)
+	registerCollector(t, registry, rangedInfo("secondary", source.KindScalar), secondary)
+	backend := newFakeBackend()
+	plan := buildPlan(t, registry,
+		"primary",
+		"--range", "0..2",
+		"--range", "secondary=0..4",
+		"-m", "gain=0..1",
+		"-m", "secondary:pan=-1..1",
+	)
+
+	err := immediateEngine(registry, backend).Run(context.Background(), plan)
+	if err == nil || !strings.Contains(err.Error(), "sensor disappeared") {
+		t.Fatalf("Run() error = %v, want sensor failure", err)
+	}
+	voice := backend.config.Model.Voices[0]
+	if voice.Gain != .5 || voice.Pan != -.5 {
+		t.Fatalf("initial voice = %#v, want gain .5 and pan -.5", voice)
+	}
+}
+
 type manualTimer struct {
 	deadline time.Time
 	channel  chan time.Time

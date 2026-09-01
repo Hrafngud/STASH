@@ -34,6 +34,7 @@ func plannerRegistry(t *testing.T) *source.Registry {
 	}
 	register("cpu.usage", true)
 	register("cpu.no-range", false)
+	register("io.no-range", false)
 	register("-", false)
 	info := source.Info{Name: "cpu.temp", Kind: source.KindScalar, Unit: "C"}
 	minimum, maximum := 0.0, 120.0
@@ -207,6 +208,7 @@ func TestBuildPlanAcceptsRangesAndAllDocumentedControlsAndTargets(t *testing.T) 
 	tests := [][]string{
 		{"-", "--range", "0..1", "-m", "freq=80..2k"},
 		{"cpu.no-range", "--range", "cpu.no-range=0..1", "-m", "freq=80..2k"},
+		{"cpu.no-range", "--range", "0..1", "--range", "io.no-range=0..2", "-m", "freq=80..2k", "-m", "io.no-range:gain=0..1"},
 		{"cpu.usage", "-r", "rhythm:120:1/8:x-", "-m", "rhythm.gate:gate=0..1"},
 		{"cpu.usage", "-r", "rhythm:120:1/8:x-", "-m", "rhythm.hit:freq=80..2k"},
 		{"cpu.usage", "-r", "rhythm:120:1/8:x-", "-m", "rhythm.step:pan=-1..1"},
