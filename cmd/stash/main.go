@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/zalmo/stash/internal/app"
+	"github.com/zalmo/stash/internal/cli"
 )
 
 func main() {
@@ -19,6 +20,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, input io.Reader, output, diagnostics io.Writer, runner *app.Runner) int {
+	if cli.IsHelpRequest(args) {
+		return finish(ctx, diagnostics, cli.WriteHelp(output))
+	}
 	if runner == nil {
 		var err error
 		runner, err = app.NewDefault(ctx, input)

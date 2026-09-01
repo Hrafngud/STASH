@@ -5,6 +5,8 @@
 ```text
 stash SOURCE [OPTIONS]
 stash DISCOVERY
+stash -h
+stash --help
 ```
 
 `SOURCE` is either:
@@ -58,6 +60,7 @@ A user may quote arguments voluntarily, but quoting is not required for valid ca
 ## 3. Top-level options
 
 ```text
+-h, --help                   show command help and exit
 -l [PREFIX]                  list sources
 -i SOURCE                    inspect a source
 -p PRIMITIVE                 resolve/inspect a primitive
@@ -84,6 +87,10 @@ A user may quote arguments voluntarily, but quoting is not required for valid ca
 Repeated `-m`, `--range`, `-f`, and `-x` options are allowed.
 
 Repeated effects preserve command-line order.
+
+`-h` and `--help` are complete top-level command forms. They write help to
+stdout and exit successfully. Combining a help flag with another argument is
+an error.
 
 ## 4. Operating modes
 

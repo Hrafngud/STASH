@@ -1,0 +1,272 @@
+.TH STASH 1 "September 2026" "stash" "User Commands"
+.SH NAME
+stash \- turn Linux system telemetry into sound
+.SH SYNOPSIS
+.B stash
+.I SOURCE
+.RI [ OPTIONS ]
+.br
+.B stash \-l
+.RI [ PREFIX ]
+.br
+.B stash \-i
+.I SOURCE
+.br
+.B stash \-p
+.I PRIMITIVE
+.br
+.B stash
+.RB ( \-h | \-\-help )
+.SH DESCRIPTION
+.B stash
+(Sound Telemetry Auto SHell) reads live Linux hardware and operating-system
+telemetry.  With no sound-producing option it writes numeric samples to
+standard output.  Sound options turn the source into a control signal for a
+persistent oscillator, note events, rhythm, and an ordered effects chain.
+Csound provides audio-device and raw-PCM synthesis.
+.PP
+.I SOURCE
+is a canonical source name such as
+.BR cpu.usage ,
+.BR cpu.cores.usage ,
+.BR ram.used ,
+or
+.BR net.enp4s0.rx .
+Use
+.B \-
+as the source to read numeric samples from standard input.
+.SH COMMAND FORMS
+.TP
+.BR \-h ", " \-\-help
+Print a concise command reference to standard output and exit successfully.
+The help flag must be the only argument.
+.TP
+.BR \-l " [" PREFIX "]"
+List known sources, optionally restricted by a case-sensitive name prefix.
+Unavailable hardware-specific sources are identified as such.
+.TP
+.BI \-i " SOURCE"
+Show a source's name, scalar or vector kind, unit, natural range, and local
+availability.
+.TP
+.BI \-p " PRIMITIVE"
+Resolve and inspect a note, note list, scale, mode, or tempo-bearing rhythm.
+.SH OPTIONS
+Options in this section follow
+.IR SOURCE .
+.TP
+.BI \-w " WAVE"
+Select
+.BR sine ,
+.BR square ,
+.BR saw ,
+.BR tri ,
+or
+.BR noise .
+The default is
+.BR sine .
+.TP
+.BI \-m " [CONTROL:]TARGET=MAP"
+Add a modulation.  Omitted
+.I CONTROL
+means the primary source.  This option may be repeated.
+.TP
+.BI \-\-range " [CONTROL=]MIN..MAX"
+Override the normalization range of a control.  Omitted
+.I CONTROL
+means the primary source.  This option may be repeated.
+.TP
+.BI \-v " GAIN"
+Set static output gain in the inclusive range 0 through 1.  The default is
+0.1.
+.TP
+.BI \-t " TRIGGER"
+Define a threshold trigger:
+.BR above:VALUE ,
+.BR below:VALUE ,
+.BR rise:VALUE ,
+or
+.BR fall:VALUE .
+Vector-source triggers are evaluated independently at each index.
+.TP
+.BI \-n " NOTES"
+Set note material.  Accepts one scientific-pitch note, a comma-separated note
+list, a scale, or a mode.  Vector index N maps to note index N.
+.TP
+.BI \-r " RHYTHM"
+Set a rhythm in
+.B rhythm:BPM:DIVISION:PATTERN
+or
+.B rhythm:DIVISION:PATTERN
+form.  A rhythm without embedded BPM requires
+.BR \-b .
+.TP
+.BI \-b " BPM"
+Set a positive tempo, overriding an embedded rhythm tempo.  Requires
+.BR \-r .
+.TP
+.BI \-d " TIME"
+Set the event gate duration.  Durations use
+.B ms
+or
+.B s
+suffixes.  The default is 100ms.
+.TP
+.BI \-a " ATTACK,DECAY,SUSTAIN,RELEASE"
+Set the amplitude envelope.  Attack, decay, and release are durations;
+sustain is from 0 through 1.  The default is 5ms,20ms,.8,50ms.
+.TP
+.BI \-\-swing " AMOUNT"
+Set alternating-subdivision swing from 50 through 75 percent.  The default is
+50 (straight timing).  Requires
+.BR \-r .
+.TP
+.BI \-f " FILTER"
+Append
+.B lp:CUTOFF[,Q]
+or
+.B hp:CUTOFF[,Q]
+to the effects chain.  The default Q is 0.707.  This option may be repeated.
+.TP
+.BI \-x " EFFECT"
+Append
+.B delay:TIME,FEEDBACK,MIX
+or
+.B drive:AMOUNT
+to the effects chain.  Delay feedback is 0 through 0.95; delay mix and drive
+amount are 0 through 1.  This option may be repeated.
+.TP
+.B \-o \-
+Write headerless raw PCM to standard output instead of using the default audio
+device.  The format is 48,000 Hz, two-channel, stereo-interleaved,
+little-endian float32.
+.SH MAPPINGS
+A map has the form:
+.PP
+.RS
+.B MIN..MAX[/CURVE][~SMOOTH]
+.RE
+.PP
+.I CURVE
+is
+.BR linear ,
+.BR exp ,
+or
+.BR log ;
+the default is linear.
+.I SMOOTH
+is a duration such as 150ms; the default is 0ms.
+.PP
+Signal targets are
+.BR freq ,
+.BR gain ,
+.BR pan ,
+and
+.BR gate .
+Effect targets are
+.BR filter.cutoff ,
+.BR filter.q ,
+.BR delay.time ,
+.BR delay.feedback ,
+.BR delay.mix ,
+and
+.BR drive.amount .
+When several matching effects exist, an unindexed target addresses the most
+recently declared matching effect.
+.PP
+A control may be a telemetry source or, when a rhythm is active,
+.BR rhythm.gate ,
+.BR rhythm.hit ,
+.BR rhythm.step ,
+.BR rhythm.velocity ,
+or
+.BR rhythm.phase .
+.SH VALUE GRAMMAR
+Numbers are decimal and may use
+.BR k ,
+.BR M ,
+or
+.B G
+for powers of 1000.  A range is
+.BR MIN..MAX ,
+with its minimum strictly less than its maximum.  Durations require an
+.B ms
+or
+.B s
+suffix.
+.PP
+Notes use
+.BR LETTER[ACCIDENTAL]OCTAVE ,
+for example C4, C#4, or Db4, with A4 tuned to 440 Hz.
+Scale and mode primitives use:
+.PP
+.RS
+.B scale:ROOT:NAME:LENGTH
+.br
+.B mode:ROOT:NAME:LENGTH
+.RE
+.PP
+Scales are major, minor, chromatic, pentatonic-major, and pentatonic-minor.
+Modes are ionian, dorian, phrygian, lydian, mixolydian, aeolian, and locrian.
+.PP
+Rhythm divisions are 1/1, 1/2, 1/4, 1/8, 1/16, and 1/32.  A pattern contains
+.B x
+for a hit and
+.B \-
+for a rest.
+.SH OPERATING MODES
+In telemetry mode, scalar sources write one value per line and vector sources
+write one comma-separated vector per line.  No labels are emitted.
+.PP
+Any sound-producing option selects audio mode.  The default device receives
+audio and standard output remains empty.  With
+.BR \-o " " \- ,
+raw PCM is written to standard output.  Diagnostics always go to standard
+error.
+.SH EXAMPLES
+List CPU sources and inspect aggregate CPU usage:
+.PP
+.RS
+.nf
+stash \-l cpu
+stash \-i cpu.usage
+.fi
+.RE
+.PP
+Map CPU usage exponentially to a smoothed sine frequency:
+.PP
+.RS
+.nf
+stash cpu.usage \-w sine \-m freq=80..2k/exp~150ms
+.fi
+.RE
+.PP
+Use newline-delimited standard input as a control:
+.PP
+.RS
+.nf
+printf '0\en.5\en1\en' | stash \- \-\-range 0..1 \-m freq=100..2k
+.fi
+.RE
+.PP
+Play vector-triggered notes from a mode:
+.PP
+.RS
+.nf
+stash cpu.cores.usage \-t above:95 \-n mode:E3:phrygian:12 \-d 150ms
+.fi
+.RE
+.SH DEFAULTS
+Waveform sine; frequency 440 Hz; gain 0.1; pan 0; mapping curve linear;
+smoothing 0ms; event gate 100ms; ADSR 5ms,20ms,.8,50ms; filter Q 0.707;
+swing 50; sample rate 48,000 Hz; two output channels.
+.SH EXIT STATUS
+Zero indicates success, including help and clean SIGINT or SIGTERM shutdown.
+One indicates invalid syntax, unavailable input, initialization or execution
+failure, or an output error.
+.SH SIGNALS
+SIGINT and SIGTERM stop live telemetry or audio commands cleanly.
+.SH SEE ALSO
+Project documentation and examples are available at
+.UR https://github.com/zalmo/stash
+.UE .

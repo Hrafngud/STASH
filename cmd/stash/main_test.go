@@ -50,3 +50,41 @@ func TestRunTreatsSignalContextCancellationAsCleanShutdown(t *testing.T) {
 		t.Fatalf("stdout = %q, stderr = %q; want both empty", stdout.String(), stderr.String())
 	}
 }
+
+func TestRunWritesHelpWithoutInitializingRunner(t *testing.T) {
+	for _, flag := range []string{"-h", "--help"} {
+		t.Run(flag, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			// An unusable injected runner proves help exits before runtime
+			// dependency validation or source discovery.
+			exitCode := run(context.Background(), []string{flag}, strings.NewReader(""), &stdout, &stderr, &app.Runner{})
+			if exitCode != 0 {
+				t.Fatalf("exit code = %d, want 0", exitCode)
+			}
+			if !strings.HasPrefix(stdout.String(), "STASH — Sound Telemetry Auto SHell\n") {
+				t.Fatalf("stdout does not start with help heading: %q", stdout.String())
+			}
+			if !strings.Contains(stdout.String(), "stash -h | --help") {
+				t.Fatalf("stdout does not document both help flags: %q", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunRejectsHelpCombinedWithOtherArguments(t *testing.T) {
+	runner := &app.Runner{Registry: source.NewRegistry()}
+	var stdout, stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"--help", "cpu.usage"}, strings.NewReader(""), &stdout, &stderr, runner)
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), `unknown option "--help"`) {
+		t.Fatalf("stderr = %q, want unknown-option diagnostic", stderr.String())
+	}
+}

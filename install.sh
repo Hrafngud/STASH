@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 install_dir="${HOME}/.local/bin"
+man_dir="${HOME}/.local/share/man/man1"
 build_path="$(mktemp "${TMPDIR:-/tmp}/stash.XXXXXX")"
 
 cleanup() {
@@ -25,9 +26,12 @@ go build -o "${build_path}" ./cmd/stash
 
 echo "Installing STASH to ${install_dir}/stash..."
 install -Dm755 "${build_path}" "${install_dir}/stash"
+install -Dm644 "${repo_dir}/docs/stash.1" "${man_dir}/stash.1"
 
 echo
 echo "STASH installed successfully."
+echo "Manual installed to ${man_dir}/stash.1."
+echo "Read it with: man stash"
 
 case ":${PATH}:" in
     *":${install_dir}:"*)

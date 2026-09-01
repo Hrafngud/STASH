@@ -24,6 +24,13 @@ go build -o stash ./cmd/stash
 
 Put the resulting `stash` binary on `PATH`, or run it as `./stash` from the repository.
 
+To install the binary and its `stash(1)` manual for the current user on
+Manjaro or Arch Linux, run:
+
+```bash
+./install.sh
+```
+
 ## Quick start
 
 Read aggregate CPU usage as machine-oriented numeric lines:
@@ -38,6 +45,14 @@ Discover and inspect sources:
 stash -l
 stash -l cpu
 stash -i cpu.usage
+```
+
+Show the command summary, or open the complete installed manual:
+
+```bash
+stash --help
+stash -h
+man stash
 ```
 
 Resolve musical primitives:
@@ -96,6 +111,7 @@ The bounded implementation loop and slice history are documented in [`TASKS.md`]
 
 - [`SYNTAX.md`](SYNTAX.md) — authoritative CLI syntax
 - [`EXAMPLES.md`](EXAMPLES.md) — command examples
+- [`docs/stash.1`](docs/stash.1) — installed `stash(1)` manual source
 - [`PLANNING.md`](PLANNING.md) — architecture and scope
 - [`AGENT.md`](AGENT.md) — engineering rules
 - [`TASKS.md`](TASKS.md) — implementation status and handoffs
