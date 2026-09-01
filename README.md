@@ -6,7 +6,7 @@ STASH — Sound Telemetry Auto SHell — is a Linux-first command-line instrumen
 stash cpu.usage -w sine -m freq=80..2k/exp~150ms
 ```
 
-Telemetry sources control persistent oscillators and ordered effects through a small, shell-safe CLI. Csound is the private synthesis backend.
+Telemetry sources control composable synth graphs and ordered effects through a small, shell-safe CLI. Csound is the private synthesis backend.
 
 ## Requirements
 
@@ -47,6 +47,14 @@ stash -l cpu
 stash -i cpu.usage
 ```
 
+Discover synths and resolve a declaration:
+
+```bash
+stash -l syn
+stash -i syn.fm
+stash -p syn.fm:bass,ratio=2,index=4
+```
+
 Show the command summary, or open the complete installed manual:
 
 ```bash
@@ -67,6 +75,18 @@ Sonify CPU usage through the default audio device:
 
 ```bash
 stash cpu.usage -w saw -m freq=80..1k/exp~100ms -f lp:3k -x drive:.2
+```
+
+Build an audio-rate modular patch while keeping the modulator silent in the
+master mix:
+
+```bash
+stash cpu.usage \
+  -s fm:motion,mix=0,ratio=.125,index=5 \
+  -s wavetable:voice,table=metal \
+  -m freq=45..120/exp~100ms \
+  -m syn.motion.out:syn.voice.position.mod=-.4...4 \
+  -f lp:3k -x drive:.2
 ```
 
 Use newline-delimited numbers from stdin:

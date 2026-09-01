@@ -51,12 +51,13 @@ type RangeOverride struct {
 	Range   unit.Range
 }
 
-// OrderedOptionKind identifies one of the three repeatable options. Ordered
+// OrderedOptionKind identifies one of the repeatable graph/chain options. Ordered
 // entries retain their complete argv order, including interleaved -f and -x.
 type OrderedOptionKind string
 
 const (
 	OrderedModulation OrderedOptionKind = "modulation"
+	OrderedSynth      OrderedOptionKind = "synth"
 	OrderedFilter     OrderedOptionKind = "filter"
 	OrderedEffect     OrderedOptionKind = "effect"
 )
@@ -79,6 +80,7 @@ type Command struct {
 	Primitive     string
 
 	Waveform       *Waveform
+	Synths         []sound.Synth
 	Modulations    []Modulation
 	RangeOverrides []RangeOverride
 	Gain           *float64
@@ -94,7 +96,7 @@ type Command struct {
 
 	// Ordered retains repeatable option argv order for diagnostics and later
 	// runtime routing. Effects contains the same -f/-x declarations as one
-	// typed chain, without modulation entries.
+	// typed chain, without synth or modulation entries.
 	Ordered []OrderedOption
 }
 
@@ -122,6 +124,7 @@ type PrimitiveResolution struct {
 	Notes  []primitive.Note
 	Rhythm *primitive.Rhythm
 	BPM    *float64
+	Synth  *sound.Synth
 }
 
 // Plan is a semantically validated command with documented audio defaults
@@ -133,6 +136,7 @@ type Plan struct {
 	SourceEntry source.Entry
 	HasSource   bool
 	Primitive   PrimitiveResolution
+	SynthSpec   *sound.SynthSpec
 
 	Waveform     Waveform
 	Gain         float64

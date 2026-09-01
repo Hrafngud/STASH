@@ -29,7 +29,7 @@ func TestHelpRequestsAreExactTopLevelForms(t *testing.T) {
 func TestHelpDocumentsEveryPublicOption(t *testing.T) {
 	t.Parallel()
 	for _, option := range []string{
-		"-h", "--help", "-l", "-i", "-p", "-w", "-m", "--range", "-v",
+		"-h", "--help", "-l", "-i", "-p", "-s", "-w", "-m", "--range", "-v",
 		"-t", "-n", "-r", "-b", "-d", "-a", "--swing", "-f", "-x", "-o",
 	} {
 		if !strings.Contains(cli.HelpText, option) {

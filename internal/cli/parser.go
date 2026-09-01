@@ -11,7 +11,7 @@ import (
 )
 
 var sourceOptions = map[string]struct{}{
-	"-w": {}, "-m": {}, "--range": {}, "-v": {},
+	"-s": {}, "-w": {}, "-m": {}, "--range": {}, "-v": {},
 	"-t": {}, "-n": {}, "-r": {}, "-b": {}, "-d": {},
 	"-a": {}, "--swing": {}, "-f": {}, "-x": {}, "-o": {},
 }
@@ -78,7 +78,8 @@ func Parse(args []string) (Command, error) {
 		if err != nil {
 			return Command{}, err
 		}
-		if option != "-m" && option != "--range" && option != "-f" && option != "-x" {
+		repeatableWave := option == "-w" && len(command.Synths) > 0
+		if option != "-s" && option != "-m" && option != "--range" && option != "-f" && option != "-x" && !repeatableWave {
 			if seen[option] {
 				return Command{}, fmt.Errorf("duplicate option %s", option)
 			}
@@ -86,12 +87,24 @@ func Parse(args []string) (Command, error) {
 		}
 
 		switch option {
+		case "-s":
+			synth, err := sound.ParseSynth(value)
+			if err != nil {
+				return Command{}, err
+			}
+			command.Synths = append(command.Synths, synth)
+			command.Ordered = append(command.Ordered, OrderedOption{Kind: OrderedSynth, Argument: value})
 		case "-w":
 			waveform, err := parseWaveform(value)
 			if err != nil {
 				return Command{}, err
 			}
 			command.Waveform = &waveform
+			if len(command.Synths) > 0 {
+				if err := command.Synths[len(command.Synths)-1].SetWaveform(waveform); err != nil {
+					return Command{}, err
+				}
+			}
 		case "-m":
 			modulation, err := parseModulation(value)
 			if err != nil {
@@ -197,13 +210,7 @@ func optionValue(args []string, index *int, option string) (string, error) {
 }
 
 func parseWaveform(input string) (Waveform, error) {
-	waveform := Waveform(input)
-	switch waveform {
-	case WaveSine, WaveSquare, WaveSaw, WaveTri, WaveNoise:
-		return waveform, nil
-	default:
-		return "", fmt.Errorf("unknown waveform %q: expected sine, square, saw, tri, or noise", input)
-	}
+	return sound.ParseWaveform(input)
 }
 
 func parseBoundedNumber(name, input string, minimum, maximum float64) (float64, error) {

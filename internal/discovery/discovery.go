@@ -5,11 +5,13 @@ package discovery
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/zalmo/stash/internal/cli"
 	"github.com/zalmo/stash/internal/primitive"
+	"github.com/zalmo/stash/internal/sound"
 	"github.com/zalmo/stash/internal/source"
 )
 
@@ -27,6 +29,10 @@ func Write(output io.Writer, registry *source.Registry, plan cli.Plan) error {
 	case cli.ModeList:
 		document, err = listDocument(registry, plan.Command.ListPrefix)
 	case cli.ModeInspect:
+		if plan.SynthSpec != nil {
+			document = synthInspectionDocument(*plan.SynthSpec)
+			break
+		}
 		if !plan.HasSource {
 			err = fmt.Errorf("inspect source: plan has no source metadata")
 			break
@@ -44,10 +50,20 @@ func Write(output io.Writer, registry *source.Registry, plan cli.Plan) error {
 }
 
 func listDocument(registry *source.Registry, prefix string) (string, error) {
+	if strings.HasPrefix(prefix, "syn") {
+		var document strings.Builder
+		document.WriteString("NAME\tKIND\tUNIT\tAVAILABILITY\n")
+		for _, kind := range sound.SynthTypes() {
+			name := "syn." + string(kind)
+			if strings.HasPrefix(name, prefix) {
+				fmt.Fprintf(&document, "%s\tsynth\taudio\tavailable\n", name)
+			}
+		}
+		return document.String(), nil
+	}
 	if registry == nil {
 		return "", fmt.Errorf("list sources: source registry is nil")
 	}
-
 	var document strings.Builder
 	document.WriteString("NAME\tKIND\tUNIT\tAVAILABILITY\n")
 	for _, entry := range registry.List() {
@@ -82,6 +98,9 @@ func inspectionDocument(entry source.Entry) string {
 }
 
 func primitiveDocument(input string, resolution cli.PrimitiveResolution) (string, error) {
+	if resolution.Synth != nil {
+		return resolvedSynthDocument(input, *resolution.Synth), nil
+	}
 	if resolution.Rhythm != nil {
 		if resolution.BPM == nil {
 			return "", fmt.Errorf("inspect primitive %q: rhythm has no resolved BPM", input)
@@ -92,6 +111,59 @@ func primitiveDocument(input string, resolution cli.PrimitiveResolution) (string
 		return "", fmt.Errorf("inspect primitive %q: note resolution is empty", input)
 	}
 	return notesDocument(input, resolution.Notes), nil
+}
+
+func synthInspectionDocument(spec sound.SynthSpec) string {
+	var document strings.Builder
+	fmt.Fprintf(&document, "name: syn.%s\ndescription: %s\n", spec.Type, spec.Description)
+	document.WriteString("configuration parameters:\n")
+	configNames := make([]string, 0, len(spec.Config))
+	for name := range spec.Config {
+		configNames = append(configNames, name)
+	}
+	sort.Strings(configNames)
+	for _, name := range configNames {
+		item := spec.Config[name]
+		required := ""
+		if item.Required {
+			required = " (required)"
+		}
+		fmt.Fprintf(&document, "  %s: default=%s%s\n", name, item.Default, required)
+	}
+	document.WriteString("modulatable parameters:\n")
+	for _, name := range sound.SortedParameterNames(spec) {
+		item := spec.Parameters[name]
+		minimum, maximum := "unbounded", "unbounded"
+		if item.Minimum != nil {
+			minimum = formatNumber(*item.Minimum)
+		}
+		if item.Maximum != nil {
+			maximum = formatNumber(*item.Maximum)
+		}
+		fmt.Fprintf(&document, "  %s: unit=%s range=%s..%s default=%s audio-rate=%t\n", name, item.Unit, minimum, maximum, formatNumber(item.Default), item.AudioRate)
+	}
+	document.WriteString("audio outputs: out (-1..1, bipolar, pre-mix, pre-pan)\n")
+	return document.String()
+}
+
+func resolvedSynthDocument(input string, synth sound.Synth) string {
+	var document strings.Builder
+	fmt.Fprintf(&document, "primitive: %s\nkind: synth\ntype: %s\nid: %s\nconfiguration:\n", input, synth.Type, synth.ID)
+	configNames := make([]string, 0, len(synth.Config))
+	for name := range synth.Config {
+		if !strings.HasPrefix(name, "_") {
+			configNames = append(configNames, name)
+		}
+	}
+	sort.Strings(configNames)
+	for _, name := range configNames {
+		fmt.Fprintf(&document, "  %s=%s\n", name, synth.Config[name])
+	}
+	document.WriteString("parameters:\n")
+	for _, name := range sound.SortedSynthParameterNames(synth) {
+		fmt.Fprintf(&document, "  %s=%s\n", name, formatNumber(synth.Parameters[name]))
+	}
+	return document.String()
 }
 
 func notesDocument(input string, notes []primitive.Note) string {

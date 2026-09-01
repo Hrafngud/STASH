@@ -61,10 +61,11 @@ A user may quote arguments voluntarily, but quoting is not required for valid ca
 
 ```text
 -h, --help                   show command help and exit
--l [PREFIX]                  list sources
--i SOURCE                    inspect a source
--p PRIMITIVE                 resolve/inspect a primitive
+-l [PREFIX]                  list sources or synths
+-i NAME                      inspect a source or synth
+-p PRIMITIVE                 resolve/inspect a primitive or synth declaration
 
+-s TYPE[:ID][,PARAM=VALUE]... add a synth node
 -w WAVE                      select waveform
 -m [CONTROL:]TARGET=MAP      add modulation
 --range [CONTROL=]RANGE      override an input range
@@ -84,7 +85,8 @@ A user may quote arguments voluntarily, but quoting is not required for valid ca
 -o TARGET                    select audio output
 ```
 
-Repeated `-m`, `--range`, `-f`, and `-x` options are allowed.
+Repeated `-s`, `-m`, `--range`, `-f`, and `-x` options are allowed. `-w` may
+also be repeated when it follows synth declarations.
 
 Repeated effects preserve command-line order.
 
@@ -107,6 +109,7 @@ writes samples to stdout.
 The following options activate audio mode:
 
 ```text
+-s
 -w
 -m
 -v
@@ -148,7 +151,118 @@ stdout is raw PCM.
 
 Diagnostics remain on stderr.
 
-## 5. Source syntax
+## 5. Synth graph
+
+Synths are declared with:
+
+```text
+-s TYPE[:ID][,PARAM=VALUE]...
+```
+
+Canonical types are:
+
+```text
+sub fm pm am ring add wavetable karplus modal granular
+```
+
+IDs start with a letter, contain only letters, numbers, `_` or `-`, and are
+unique within a command. Omitted IDs are assigned deterministically from the
+synth type: `sub`, `sub2`, and so on. Repeated synth outputs are summed before
+the existing `-f`/`-x` chain.
+
+Declaration assignments set either fixed graph configuration or a numeric base
+value. Configuration and type-specific parameters are:
+
+| Type | Configuration | Type-specific numeric parameters |
+| --- | --- | --- |
+| `sub` | `wave` (default `sine`), `filter=lp\|hp` (default `lp`) | `cutoff`, `q`, `pulsewidth` |
+| `fm`, `pm` | `wave`, `modwave` (default `sine`) | `ratio`, `modfreq`, `index`, `feedback` |
+| `am` | `wave`, `modwave` (default `sine`) | `ratio`, `modfreq`, `depth` |
+| `ring` | `wave`, `modwave` (default `sine`) | `ratio`, `modfreq` |
+| `add` | `wave` (default `sine`), `partials` (default `8`, range 1..128) | `partial.N.gain`, `partial.N.ratio`, `partial.N.detune` |
+| `wavetable` | required `table` | `position`, `scan` |
+| `karplus` | none | `excite`, `damping`, `feedback`, `brightness` |
+| `modal` | required `model=metal\|wood\|glass\|bell\|plate` | `excite`, `decay`, `brightness`, `inharmonicity` |
+| `granular` | required `sample` | `density`, `size`, `position`, `pitch`, `jitter`, `spread` |
+
+`N` is a zero-based additive partial index smaller than `partials`. Wavetable
+names `metal`, `digital`, and `smooth` select built-ins; other `table` values
+and granular `sample` values are passed to Csound as file paths. Use
+`stash -i syn.TYPE` for every parameter's unit, default, range, and audio-rate
+capability.
+
+Every synth exposes `freq`, `gain`, `pan`, `gate`, and `mix`. Type-specific
+numeric parameters are also modulatable. Static values belong to the synth
+declaration:
+
+```bash
+stash cpu.usage -s fm:bass,ratio=2,index=3,wave=sine
+```
+
+For `fm`, `pm`, `am`, and `ring`, `ratio` derives the modulator frequency from
+`freq`, while `modfreq` supplies it directly. A synth cannot explicitly define
+or target both.
+
+After a synth declaration, `-w WAVE` is shorthand for setting that synth's
+primary `wave` configuration and may be repeated for successive nodes. It is
+valid only for `sub`, `fm`, `pm`, `am`, `ring`, and `add`. Without a preceding
+`-s`, `-w` retains its legacy meaning.
+
+Targets use either the most recent synth or an explicit ID:
+
+```text
+syn.PARAM
+syn.ID.PARAM
+syn.PARAM.mod
+syn.ID.PARAM.mod
+```
+
+Unqualified `freq`, `gain`, `pan`, and `gate` continue to target the most
+recent synth. A `.mod` inlet is additive; multiple routes to the same inlet
+are summed with the direct/base value.
+
+Telemetry and rhythm controls may target any numeric synth parameter. A synth
+output may target only parameters reported as `audio-rate=true` by
+`stash -i syn.TYPE`.
+
+Each synth has a bipolar, audio-rate, pre-mix, pre-pan output:
+
+```text
+syn.ID.out
+```
+
+Setting `mix=0` removes a synth from the audible master mix without disabling
+that output. Synth outputs use the ordinary modulation grammar:
+
+```bash
+stash cpu.usage \
+  -s sub:mod,wave=sine,mix=0 \
+  -s sub:voice,wave=saw \
+  -m freq=80..220 \
+  -m syn.mod.out:syn.voice.freq.mod=-300..300
+```
+
+The complete graph is validated before Csound starts. Unknown types,
+parameters and references, duplicate IDs, unsupported audio-rate targets,
+`ratio`/`modfreq` conflicts, missing required configuration, and routing
+cycles are errors.
+
+Discovery forms are:
+
+```bash
+stash -l syn
+stash -i syn.fm
+stash -p syn.fm:bass,ratio=2,index=4
+```
+
+Granular `size` maps use typed time ranges such as `5ms..150ms`. Numeric maps
+and time maps cannot be mixed for a time-valued target.
+
+With explicit synths, `-v` controls master gain (default `1`); each synth's own
+`gain` parameter defaults to `0.1`. `-a` supplies the envelope used by every
+declared synth.
+
+## 6. Source syntax
 
 Canonical source naming:
 
@@ -191,7 +305,7 @@ io.nvme0n1.ops
 
 Source names are case-sensitive.
 
-## 6. Scalar and vector sources
+## 7. Scalar and vector sources
 
 Scalar:
 
@@ -211,7 +325,7 @@ produces one ordered value per logical CPU.
 
 Vector ordering is stable and corresponds to ascending logical core index.
 
-## 7. Numeric grammar
+## 8. Numeric grammar
 
 Plain decimal:
 
@@ -249,7 +363,7 @@ Negative values are valid where the target permits them:
 -12
 ```
 
-## 8. Time grammar
+## 9. Time grammar
 
 Supported suffixes:
 
@@ -269,7 +383,7 @@ Examples:
 
 Bare time values are invalid where a duration is required.
 
-## 9. Range grammar
+## 10. Range grammar
 
 ```text
 MIN..MAX
@@ -287,7 +401,7 @@ Examples:
 
 `MIN` must be strictly less than `MAX`.
 
-## 10. Mapping grammar
+## 11. Mapping grammar
 
 ```text
 MIN..MAX[/CURVE][~SMOOTH]
@@ -324,7 +438,7 @@ Default smoothing:
 0ms
 ```
 
-## 11. Modulation grammar
+## 12. Modulation grammar
 
 Primary-source modulation:
 
@@ -363,8 +477,9 @@ Examples:
 
 - A telemetry source.
 - A rhythm control.
+- A synth output such as `syn.mod.out`.
 
-## 12. Modulation targets
+## 13. Modulation targets
 
 Initial signal targets:
 
@@ -374,6 +489,19 @@ gain
 pan
 gate
 ```
+
+With explicit synths these address the most recently declared synth. Qualified
+synth targets and additive inlets are:
+
+```text
+syn.PARAM
+syn.ID.PARAM
+syn.PARAM.mod
+syn.ID.PARAM.mod
+```
+
+The valid parameters, units, ranges, and audio-rate support depend on the
+synth type and are shown by `stash -i syn.TYPE`.
 
 Initial filter targets:
 
@@ -408,7 +536,7 @@ Example:
 
 The modulation targets the second low-pass filter.
 
-## 13. Input range override
+## 14. Input range override
 
 Primary control:
 
@@ -447,7 +575,7 @@ stash cpu.usage \
   -m net.enp4s0.rx:freq=80..2k/log
 ```
 
-## 14. Waveforms
+## 15. Waveforms
 
 Syntax:
 
@@ -471,13 +599,18 @@ Default:
 sine
 ```
 
+With no synth declaration, `-w` selects the legacy voice waveform. After
+`-s`, it sets the most recently declared synth's primary waveform and can be
+repeated after later synth declarations. Synths without a primary waveform
+reject `-w`; configure wavetable, modal, and granular nodes in `-s` instead.
+
 Example:
 
 ```bash
 stash cpu.usage -w saw -m freq=80..1k
 ```
 
-## 15. Static gain
+## 16. Static gain
 
 Syntax:
 
@@ -497,13 +630,16 @@ Example:
 -v .2
 ```
 
-Default:
+Default without explicit synths:
 
 ```text
 0.1
 ```
 
-## 16. Pan
+With explicit synths, `-v` is master gain and defaults to `1`; each node's
+`gain` parameter defaults to `0.1`.
+
+## 17. Pan
 
 Pan is exposed as a modulation target.
 
@@ -529,7 +665,7 @@ stash net.enp4s0.rx \
   -m pan=-1..1
 ```
 
-## 17. Trigger grammar
+## 18. Trigger grammar
 
 ```text
 above:VALUE
@@ -585,7 +721,7 @@ current  < X
 
 Vector sources evaluate triggers independently per index.
 
-## 18. Gate duration
+## 19. Gate duration
 
 Syntax:
 
@@ -605,7 +741,7 @@ Default for event-driven notes:
 100ms
 ```
 
-## 19. ADSR
+## 20. ADSR
 
 Syntax:
 
@@ -634,7 +770,7 @@ Default:
 5ms,20ms,.8,50ms
 ```
 
-## 20. Notes
+## 21. Notes
 
 Scientific pitch notation:
 
@@ -671,7 +807,7 @@ Comma-separated arrays:
 C4,E4,G4,C5
 ```
 
-## 21. Scale primitive
+## 22. Scale primitive
 
 Grammar:
 
@@ -701,7 +837,7 @@ pentatonic-minor
 
 The resolved output contains exactly `LENGTH` notes.
 
-## 22. Mode primitive
+## 23. Mode primitive
 
 Grammar:
 
@@ -732,7 +868,7 @@ locrian
 
 The resolved output contains exactly `LENGTH` notes.
 
-## 23. Notes option
+## 24. Notes option
 
 Syntax:
 
@@ -766,7 +902,7 @@ If note count is smaller than vector length, execution fails.
 
 If note count is larger than vector length, extra notes are ignored.
 
-## 24. Rhythm primitive
+## 25. Rhythm primitive
 
 Full grammar:
 
@@ -791,7 +927,7 @@ rhythm:1/8:x-x-x-x-
 
 When BPM is omitted, `-b BPM` is required.
 
-## 25. BPM
+## 26. BPM
 
 Syntax:
 
@@ -815,7 +951,7 @@ Examples:
 
 If both `-b` and rhythm-embedded BPM are provided, `-b` overrides the rhythm BPM.
 
-## 26. Rhythm division
+## 27. Rhythm division
 
 Grammar:
 
@@ -836,7 +972,7 @@ Initial supported divisions:
 
 Division identifies the duration represented by one pattern step.
 
-## 27. Rhythm pattern
+## 28. Rhythm pattern
 
 Initial alphabet:
 
@@ -855,7 +991,7 @@ x---x---x-x-x---
 
 Pattern must contain at least one step.
 
-## 28. Rhythm controls
+## 29. Rhythm controls
 
 Every active rhythm exposes:
 
@@ -899,7 +1035,7 @@ Normalized progress through the current step:
 0..1
 ```
 
-## 29. Swing
+## 30. Swing
 
 Syntax:
 
@@ -923,7 +1059,7 @@ Default:
 
 Swing applies to alternating subdivisions.
 
-## 30. Rhythm option
+## 31. Rhythm option
 
 Syntax:
 
@@ -944,7 +1080,7 @@ Examples:
 
 A rhythm articulates event-driven sound and exposes rhythm controls for modulation.
 
-## 31. Filters
+## 32. Filters
 
 Syntax:
 
@@ -988,7 +1124,7 @@ Default Q:
 
 Filters are appended in declaration order.
 
-## 32. Generic effects
+## 33. Generic effects
 
 Syntax:
 
@@ -1036,7 +1172,7 @@ AMOUNT = 0..1
 
 Effects are appended in declaration order.
 
-## 33. Output
+## 34. Output
 
 Default:
 
@@ -1062,7 +1198,7 @@ interleave:  stereo interleaved
 
 No metadata header is written.
 
-## 34. stdin source
+## 35. stdin source
 
 Source:
 
@@ -1098,7 +1234,7 @@ stash - \
   -m freq=100..2k
 ```
 
-## 35. stdout contract
+## 36. stdout contract
 
 ### Telemetry mode
 
@@ -1142,7 +1278,7 @@ stderr:
 diagnostics
 ```
 
-## 36. Telemetry output format
+## 37. Telemetry output format
 
 Scalar source:
 
@@ -1170,7 +1306,7 @@ Example:
 
 No labels are emitted in telemetry mode.
 
-## 37. Discovery
+## 38. Discovery
 
 ### List all sources
 
@@ -1185,6 +1321,14 @@ stash -l cpu
 ```
 
 Filtering is prefix-based.
+
+### List synths
+
+```bash
+stash -l syn
+```
+
+Synth discovery names use the `syn.TYPE` namespace.
 
 ### Inspect source
 
@@ -1202,6 +1346,16 @@ natural range
 availability
 ```
 
+### Inspect synth type
+
+```bash
+stash -i syn.fm
+```
+
+Human-readable output contains the description, fixed configuration,
+modulatable parameters with units/ranges/defaults and audio-rate support, and
+the `out` audio output.
+
 ### Resolve primitive
 
 ```bash
@@ -1209,14 +1363,19 @@ stash -p C4
 stash -p scale:C4:major:8
 stash -p mode:E3:phrygian:8
 stash -p rhythm:120:1/8:x-x-x-x-
+stash -p syn.fm:bass,ratio=2,index=4
 ```
 
-## 38. Defaults
+A resolved synth declaration includes its assigned ID, configuration, and all
+numeric base values.
+
+## 39. Defaults
 
 ```text
 waveform       sine
 frequency      440Hz
-gain           0.1
+voice/node gain 0.1
+synth master   1
 pan            0
 curve          linear
 smoothing      0ms
@@ -1228,7 +1387,7 @@ sample rate    48000Hz
 channels       2
 ```
 
-## 39. Canonical errors
+## 40. Canonical errors
 
 Malformed syntax fails immediately.
 
@@ -1243,6 +1402,8 @@ stash: invalid trigger: over:95
 stash: invalid note: H4
 stash: unknown mode: superlocrian
 stash: invalid rhythm pattern: x_o_x
+stash: unknown synth: supersaw
+stash: duplicate synth id: bass
 stash: source cpu.power unavailable on this system
 stash: 12 vector values require at least 12 notes; got 8
 ```

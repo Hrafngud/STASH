@@ -150,10 +150,14 @@ func (session *fakeSession) snapshot() []audio.Update {
 }
 
 func cloneSoundModel(model sound.Model) sound.Model {
-	return sound.Model{
-		Voices:  append([]sound.Voice(nil), model.Voices...),
-		Effects: append([]sound.Effect(nil), model.Effects...),
+	cloned := sound.Model{
+		Voices:      append([]sound.Voice(nil), model.Voices...),
+		Effects:     append([]sound.Effect(nil), model.Effects...),
+		AudioRoutes: append([]sound.AudioRoute(nil), model.AudioRoutes...),
+		MasterGain:  model.MasterGain, MasterGainSet: model.MasterGainSet,
 	}
+	cloned.Synths = cloneRuntimeSynths(model.Synths)
+	return cloned
 }
 
 func registerCollector(t *testing.T, registry *source.Registry, info source.Info, collector source.Collector) {
@@ -221,6 +225,28 @@ func TestScalarMappingSmoothsExplicitDeltasWithoutRestartingBackend(t *testing.T
 	want := 440 + (1100-440)*(1-math.Exp(-1))
 	if math.Abs(updates[0].Value-want) > 1e-9 {
 		t.Fatalf("smoothed frequency = %v, want %v", updates[0].Value, want)
+	}
+}
+
+func TestSynthParameterMappingUpdatesPersistentNode(t *testing.T) {
+	origin := time.Unix(12, 0)
+	collector := &sequenceCollector{samples: []source.Sample{
+		source.ScalarSample{Value: 0, Time: origin},
+		source.ScalarSample{Value: 100, Time: origin.Add(50 * time.Millisecond)},
+	}}
+	registry := source.NewRegistry()
+	registerCollector(t, registry, rangedInfo("cpu.usage", source.KindScalar), collector)
+	backend := newFakeBackend()
+	plan := buildPlan(t, registry, "cpu.usage", "-s", "fm:bass,index=2", "-m", "syn.bass.index=0..10")
+	if err := immediateEngine(registry, backend).Run(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.config.Model.Synths) != 1 || backend.config.Model.Synths[0].Parameters["index"] != 0 {
+		t.Fatalf("initial synth model = %#v", backend.config.Model.Synths)
+	}
+	updates := backend.session.snapshot()
+	if len(updates) != 1 || !updates[0].Target.IsSynth || updates[0].Target.SynthIndex != 0 || updates[0].Target.Name != "index" || updates[0].Value != 10 {
+		t.Fatalf("updates = %#v", updates)
 	}
 }
 

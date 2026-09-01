@@ -22,9 +22,10 @@ const (
 
 // Mapping describes an output range, curve, and smoothing time constant.
 type Mapping struct {
-	Output    unit.Range
-	Curve     Curve
-	Smoothing time.Duration
+	Output     unit.Range
+	OutputUnit string
+	Curve      Curve
+	Smoothing  time.Duration
 }
 
 // Mapper applies a Mapping to one input stream and retains its smoothed output.
@@ -73,15 +74,15 @@ func ParseMapping(input string) (Mapping, error) {
 		}
 		curve = parsed
 	}
-	if strings.Contains(rangePart, "...") {
+	if strings.Contains(rangePart, "...") && !strings.HasPrefix(rangePart, "-.") {
 		return Mapping{}, fmt.Errorf("invalid mapping %q: output range: expected MIN..MAX", input)
 	}
 
-	output, err := unit.ParseRange(rangePart)
+	output, outputUnit, err := unit.ParseTypedRange(rangePart)
 	if err != nil {
 		return Mapping{}, fmt.Errorf("invalid mapping %q: output range: %w", input, err)
 	}
-	return Mapping{Output: output, Curve: curve, Smoothing: smoothing}, nil
+	return Mapping{Output: output, OutputUnit: outputUnit, Curve: curve, Smoothing: smoothing}, nil
 }
 
 // ParseCurve parses one of the three public mapping curve names.

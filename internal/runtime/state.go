@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zalmo/stash/internal/audio"
@@ -17,17 +19,18 @@ import (
 )
 
 type controlState struct {
-	plan          cli.Plan
-	model         sound.Model
-	session       audio.Session
-	updateContext context.Context
-	bindings      []*mappingBinding
-	trigger       *triggerBinding
-	rhythmClock   *primitive.RhythmClock
-	rhythmOrigin  time.Time
-	latestPrimary []float64
-	gateValues    []float64
-	gateGen       []uint64
+	plan           cli.Plan
+	model          sound.Model
+	session        audio.Session
+	updateContext  context.Context
+	bindings       []*mappingBinding
+	trigger        *triggerBinding
+	rhythmClock    *primitive.RhythmClock
+	rhythmOrigin   time.Time
+	latestPrimary  []float64
+	gateValues     []float64
+	gateGen        []uint64
+	gateControlled []bool
 }
 
 type mappingBinding struct {
@@ -38,6 +41,7 @@ type mappingBinding struct {
 	mappers []*control.Mapper
 	last    []time.Time
 	hasLast []bool
+	current float64
 }
 
 type triggerBinding struct {
@@ -50,20 +54,31 @@ func newControlState(plan cli.Plan, model sound.Model, prepared map[string]*prep
 		return nil, fmt.Errorf("plan has %d modulations but %d resolved targets", len(plan.Command.Modulations), len(plan.SoundTargets))
 	}
 	state := &controlState{
-		plan:          plan,
-		model:         model,
-		latestPrimary: append([]float64(nil), prepared[plan.Command.Source].values...),
-		gateValues:    make([]float64, len(model.Voices)),
-		gateGen:       make([]uint64, len(model.Voices)),
+		plan:           plan,
+		model:          model,
+		latestPrimary:  append([]float64(nil), prepared[plan.Command.Source].values...),
+		gateValues:     make([]float64, soundNodeCount(model)),
+		gateGen:        make([]uint64, soundNodeCount(model)),
+		gateControlled: make([]bool, soundNodeCount(model)),
 	}
-	for index := range model.Voices {
-		state.gateValues[index] = model.Voices[index].Gate
+	for index := range state.gateValues {
+		if len(model.Synths) > 0 {
+			state.gateValues[index] = model.Synths[index].Parameters["gate"]
+			if model.Synths[index].Parameters["mix"] == 0 {
+				state.gateControlled[index] = true
+			}
+		} else {
+			state.gateValues[index] = model.Voices[index].Gate
+		}
 	}
 
 	for index, modulation := range plan.Command.Modulations {
 		name := modulation.Control
 		if name == "" {
 			name = plan.Command.Source
+		}
+		if strings.HasPrefix(name, "syn.") && strings.HasSuffix(name, ".out") {
+			continue
 		}
 		input, err := state.inputRange(name, prepared)
 		if err != nil {
@@ -72,6 +87,16 @@ func newControlState(plan cli.Plan, model sound.Model, prepared map[string]*prep
 		state.bindings = append(state.bindings, &mappingBinding{
 			control: name, target: plan.SoundTargets[index], mapping: modulation.Mapping, input: input,
 		})
+		target := plan.SoundTargets[index]
+		if target.Name == "gate" {
+			if target.IsSynth {
+				state.gateControlled[target.SynthIndex] = true
+			} else if target.EffectIndex < 0 {
+				for node := range state.gateControlled {
+					state.gateControlled[node] = true
+				}
+			}
+		}
 	}
 	if plan.Command.Trigger != nil {
 		binding := &triggerBinding{}
@@ -173,8 +198,13 @@ func (state *controlState) applyMappings(name string, values []float64, at time.
 }
 
 func (binding *mappingBinding) apply(state *controlState, values []float64, at time.Time) error {
-	count := len(state.model.Voices)
-	if binding.target.EffectIndex >= 0 {
+	count := soundNodeCount(state.model)
+	if binding.target.Vector {
+		count, _ = strconv.Atoi(state.model.Synths[binding.target.SynthIndex].Config["partials"])
+		if len(values) != count {
+			return fmt.Errorf("vector control with %d values cannot address %d additive partials", len(values), count)
+		}
+	} else if binding.target.EffectIndex >= 0 || binding.target.IsSynth {
 		if len(values) != 1 {
 			return fmt.Errorf("vector control with %d values cannot address global effect target", len(values))
 		}
@@ -188,12 +218,15 @@ func (binding *mappingBinding) apply(state *controlState, values []float64, at t
 		binding.hasLast = make([]bool, count)
 		for index := 0; index < count; index++ {
 			voiceIndex := index
-			if binding.target.EffectIndex >= 0 {
+			if (binding.target.EffectIndex >= 0 || binding.target.IsSynth) && !binding.target.Vector {
 				voiceIndex = 0
 			}
 			initial, err := binding.target.Value(state.model, voiceIndex)
 			if err != nil {
 				return err
+			}
+			if binding.target.IsSynth && binding.target.Mod {
+				initial = 0
 			}
 			mapper, err := control.NewMapper(binding.mapping, binding.input, initial)
 			if err != nil {
@@ -221,8 +254,18 @@ func (binding *mappingBinding) apply(state *controlState, values []float64, at t
 		binding.last[index] = at
 		binding.hasLast[index] = true
 		voiceIndex := index
-		if binding.target.EffectIndex >= 0 {
+		if (binding.target.EffectIndex >= 0 || binding.target.IsSynth) && !binding.target.Vector {
 			voiceIndex = 0
+		}
+		if binding.target.IsSynth && binding.target.Mod {
+			binding.current = mapped
+			total := 0.0
+			for _, other := range state.bindings {
+				if other.target.IsSynth && other.target.Mod && other.target.SynthIndex == binding.target.SynthIndex && other.target.Name == binding.target.Name {
+					total += other.current
+				}
+			}
+			mapped = total
 		}
 		if err := state.update(binding.target, voiceIndex, mapped); err != nil {
 			return err
@@ -236,6 +279,9 @@ func (state *controlState) update(target sound.Target, voiceIndex int, value flo
 		return err
 	}
 	if target.Name == "gate" && target.EffectIndex < 0 {
+		if target.IsSynth {
+			voiceIndex = target.SynthIndex
+		}
 		state.gateValues[voiceIndex] = value
 	}
 	if state.session != nil {
@@ -259,14 +305,14 @@ func (state *controlState) evaluateTrigger(values []float64) ([]int, error) {
 		if err != nil || !active {
 			return nil, err
 		}
-		indices := make([]int, len(state.model.Voices))
+		indices := make([]int, soundNodeCount(state.model))
 		for index := range indices {
 			indices[index] = index
 		}
 		return indices, nil
 	}
-	if len(values) != len(state.model.Voices) {
-		return nil, fmt.Errorf("vector trigger received %d values for %d voices", len(values), len(state.model.Voices))
+	if len(values) != soundNodeCount(state.model) {
+		return nil, fmt.Errorf("vector trigger received %d values for %d voices", len(values), soundNodeCount(state.model))
 	}
 	active, err := state.trigger.vector.Evaluate(values)
 	if err != nil {
@@ -292,11 +338,11 @@ func (state *controlState) applyRhythm(controls primitive.RhythmControls, at tim
 			if err != nil {
 				return nil, err
 			}
-			selected := make([]bool, len(state.model.Voices))
+			selected := make([]bool, soundNodeCount(state.model))
 			for _, index := range indices {
 				selected[index] = true
 			}
-			for index := range state.model.Voices {
+			for index := range state.gateValues {
 				if selected[index] {
 					state.gateGen[index]++
 					// A zero-to-one transition retriggers the persistent voice even
@@ -320,7 +366,7 @@ func (state *controlState) applyRhythm(controls primitive.RhythmControls, at tim
 		} else if controls.Gate == 0 {
 			// Rest steps end any note whose configured gate duration extends
 			// beyond the hit step, without creating a new trigger evaluation.
-			for index := range state.model.Voices {
+			for index := range state.gateValues {
 				if state.gateValues[index] != 0 {
 					state.gateGen[index]++
 					if err := state.setGate(index, 0); err != nil {
@@ -330,7 +376,7 @@ func (state *controlState) applyRhythm(controls primitive.RhythmControls, at tim
 			}
 		}
 	} else if state.trigger == nil {
-		for index := range state.model.Voices {
+		for index := range state.gateValues {
 			if state.gateValues[index] != controls.Gate {
 				if err := state.setGate(index, controls.Gate); err != nil {
 					return nil, err
@@ -340,7 +386,11 @@ func (state *controlState) applyRhythm(controls primitive.RhythmControls, at tim
 	}
 	if controls.Hit == 1 && state.plan.SourceEntry.Info.Kind == source.KindScalar && len(state.plan.Command.Notes) > 1 {
 		note := state.plan.Command.Notes[controls.Step%len(state.plan.Command.Notes)]
-		if err := state.update(sound.Target{Name: "freq", EffectIndex: -1}, 0, note.Frequency()); err != nil {
+		target, err := sound.ResolveModelTarget(state.model, "freq")
+		if err != nil {
+			return nil, err
+		}
+		if err := state.update(target, 0, note.Frequency()); err != nil {
 			return nil, err
 		}
 	}
@@ -368,7 +418,20 @@ func (state *controlState) rhythmVectorTrigger() bool {
 }
 
 func (state *controlState) setGate(index int, value float64) error {
+	if index >= 0 && index < len(state.gateControlled) && state.gateControlled[index] {
+		return nil
+	}
+	if len(state.model.Synths) > 0 {
+		return state.update(sound.Target{Name: "gate", EffectIndex: -1, IsSynth: true, SynthIndex: index}, 0, value)
+	}
 	return state.update(sound.Target{Name: "gate", EffectIndex: -1}, index, value)
+}
+
+func soundNodeCount(model sound.Model) int {
+	if len(model.Synths) > 0 {
+		return len(model.Synths)
+	}
+	return len(model.Voices)
 }
 
 func (state *controlState) scheduleInitialGates(ctx context.Context, clock Clock, events chan<- runtimeEvent) {

@@ -3,6 +3,7 @@ package sound
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/zalmo/stash/internal/unit"
@@ -10,18 +11,45 @@ import (
 
 // Model is the complete backend-independent persistent signal/effect state.
 type Model struct {
-	Voices  []Voice
-	Effects []Effect
+	Voices        []Voice
+	Synths        []Synth
+	AudioRoutes   []AudioRoute
+	Effects       []Effect
+	MasterGain    float64
+	MasterGainSet bool
 }
 
 // Validate checks every voice and effect in declaration order.
 func (model Model) Validate() error {
-	if len(model.Voices) == 0 {
-		return fmt.Errorf("sound model requires at least one voice")
+	if len(model.Voices) == 0 && len(model.Synths) == 0 {
+		return fmt.Errorf("sound model requires at least one voice or synth")
 	}
 	for index, voice := range model.Voices {
 		if err := voice.Validate(); err != nil {
 			return fmt.Errorf("voice %d: %w", index, err)
+		}
+	}
+	ids := map[string]bool{}
+	for index, synth := range model.Synths {
+		if ids[synth.ID] {
+			return fmt.Errorf("duplicate synth id: %s", synth.ID)
+		}
+		ids[synth.ID] = true
+		if err := synth.Validate(); err != nil {
+			return fmt.Errorf("synth %d: %w", index, err)
+		}
+	}
+	if model.MasterGainSet {
+		if err := validateRange("master gain", model.MasterGain, 0, 1); err != nil {
+			return err
+		}
+	}
+	for index, route := range model.AudioRoutes {
+		if route.SourceIndex < 0 || route.SourceIndex >= len(model.Synths) {
+			return fmt.Errorf("audio route %d source index out of range", index)
+		}
+		if !route.Target.IsSynth || route.Target.SynthIndex < 0 || route.Target.SynthIndex >= len(model.Synths) {
+			return fmt.Errorf("audio route %d target is not a valid synth target", index)
 		}
 	}
 	for index, effect := range model.Effects {
@@ -37,11 +65,32 @@ func (model Model) Validate() error {
 type Target struct {
 	Name        string
 	EffectIndex int
+	IsSynth     bool
+	SynthIndex  int
+	Mod         bool
+	Vector      bool
 }
 
 // Value reads the current numeric value for a bound target. Delay time is
 // exposed in seconds, matching Set and the public modulation grammar.
 func (target Target) Value(model Model, voiceIndex int) (float64, error) {
+	if target.IsSynth {
+		if target.SynthIndex < 0 || target.SynthIndex >= len(model.Synths) {
+			return 0, fmt.Errorf("synth index %d out of range", target.SynthIndex)
+		}
+		name := target.Name
+		if target.Vector {
+			name = fmt.Sprintf("partial.%d.gain", voiceIndex)
+		}
+		value, ok := model.Synths[target.SynthIndex].Parameters[name]
+		if !ok {
+			return 0, fmt.Errorf("synth %s has no parameter: %s", model.Synths[target.SynthIndex].ID, name)
+		}
+		if target.Mod {
+			return model.Synths[target.SynthIndex].Modulations[target.Name], nil
+		}
+		return value, nil
+	}
 	if target.EffectIndex < 0 {
 		if voiceIndex < 0 || voiceIndex >= len(model.Voices) {
 			return 0, fmt.Errorf("voice index %d out of range", voiceIndex)
@@ -83,6 +132,70 @@ func (target Target) Value(model Model, voiceIndex int) (float64, error) {
 	default:
 		return 0, fmt.Errorf("target %s is not an effect target", target.Name)
 	}
+}
+
+// ResolveModelTarget resolves synth, legacy voice, and effect targets. An
+// unqualified synth target binds to the most recently declared synth.
+func ResolveModelTarget(model Model, name string) (Target, error) {
+	if name == "freq" || name == "gain" || name == "pan" || name == "gate" {
+		if len(model.Synths) > 0 {
+			return resolveSynthParameter(model, len(model.Synths)-1, name, false)
+		}
+		return Target{Name: name, EffectIndex: -1}, nil
+	}
+	if strings.HasPrefix(name, "syn.") {
+		parts := strings.Split(strings.TrimPrefix(name, "syn."), ".")
+		mod := len(parts) > 0 && parts[len(parts)-1] == "mod"
+		if mod {
+			parts = parts[:len(parts)-1]
+		}
+		if len(parts) == 0 {
+			return Target{}, fmt.Errorf("invalid modulation target %q", name)
+		}
+		index := len(model.Synths) - 1
+		parameterParts := parts
+		if len(parts) >= 2 {
+			if found := synthIndexByID(model.Synths, parts[0]); found >= 0 {
+				index, parameterParts = found, parts[1:]
+			}
+		}
+		if index < 0 || len(parameterParts) == 0 {
+			return Target{}, fmt.Errorf("modulation target %q requires a declared synth", name)
+		}
+		return resolveSynthParameter(model, index, strings.Join(parameterParts, "."), mod)
+	}
+	return ResolveTarget(model.Effects, name)
+}
+
+func synthIndexByID(synths []Synth, id string) int {
+	for index := len(synths) - 1; index >= 0; index-- {
+		if synths[index].ID == id {
+			return index
+		}
+	}
+	return -1
+}
+
+func resolveSynthParameter(model Model, index int, parameter string, mod bool) (Target, error) {
+	if index < 0 || index >= len(model.Synths) {
+		return Target{}, fmt.Errorf("synth index %d out of range", index)
+	}
+	synth := model.Synths[index]
+	if parameter == "partials.gain" && synth.Type == SynthAdd && !mod {
+		return Target{Name: parameter, EffectIndex: -1, IsSynth: true, SynthIndex: index, Vector: true}, nil
+	}
+	if _, ok := synth.Parameters[parameter]; !ok {
+		return Target{}, fmt.Errorf("synth %s has no parameter: %s", synth.ID, parameter)
+	}
+	return Target{Name: parameter, EffectIndex: -1, IsSynth: true, SynthIndex: index, Mod: mod}, nil
+}
+
+func (target Target) SupportsAudioRate(model Model) bool {
+	if !target.IsSynth || target.SynthIndex < 0 || target.SynthIndex >= len(model.Synths) {
+		return false
+	}
+	parameter, ok := model.Synths[target.SynthIndex].Spec().Parameters[target.Name]
+	return ok && parameter.AudioRate
 }
 
 // ResolveTarget resolves a public numeric target. An effect target binds to
@@ -127,6 +240,12 @@ func (target Target) ValidateRange(value unit.Range) error {
 		return fmt.Errorf("target %s range minimum must be less than maximum", target.Name)
 	}
 	var err error
+	if target.IsSynth {
+		if target.Mod {
+			return nil
+		}
+		return fmt.Errorf("synth target range requires model context")
+	}
 	switch target.Name {
 	case "freq":
 		err = validatePositiveRange("frequency", value)
@@ -157,12 +276,108 @@ func (target Target) ValidateRange(value unit.Range) error {
 	return nil
 }
 
+// ValidateModelRange checks a target range using the concrete synth spec when
+// needed and delegates legacy/effect targets to ValidateRange.
+func (target Target) ValidateModelRange(model Model, value unit.Range) error {
+	if !target.IsSynth {
+		return target.ValidateRange(value)
+	}
+	if math.IsNaN(value.Min) || math.IsInf(value.Min, 0) || math.IsNaN(value.Max) || math.IsInf(value.Max, 0) || value.Min >= value.Max {
+		return fmt.Errorf("invalid mapping range for target %s: range must be finite and increasing", target.Name)
+	}
+	if target.Mod {
+		return nil
+	}
+	if target.Vector {
+		if value.Min < 0 || value.Max > 1 {
+			return fmt.Errorf("invalid mapping range for target %s: partial gain must be between 0 and 1", target.Name)
+		}
+		return nil
+	}
+	if target.SynthIndex < 0 || target.SynthIndex >= len(model.Synths) {
+		return fmt.Errorf("synth index %d out of range", target.SynthIndex)
+	}
+	parameter, ok := model.Synths[target.SynthIndex].Spec().Parameters[target.Name]
+	if !ok {
+		if strings.HasSuffix(target.Name, ".gain") {
+			if err := validateBoundedRange("partial gain", value, 0, 1); err != nil {
+				return fmt.Errorf("invalid mapping range for target %s: %w", target.Name, err)
+			}
+			return nil
+		}
+		if strings.HasSuffix(target.Name, ".ratio") {
+			if err := validatePositiveRange("partial ratio", value); err != nil {
+				return fmt.Errorf("invalid mapping range for target %s: %w", target.Name, err)
+			}
+			return nil
+		}
+		if strings.HasSuffix(target.Name, ".detune") {
+			return nil
+		}
+		return fmt.Errorf("synth %s has no parameter: %s", model.Synths[target.SynthIndex].ID, target.Name)
+	}
+	if parameter.Minimum != nil {
+		if (*parameter.Minimum == 0 && isStrictPositive(target.Name) && value.Min <= 0) || value.Min < *parameter.Minimum {
+			return fmt.Errorf("invalid mapping range for target %s: minimum is out of range", target.Name)
+		}
+	}
+	if parameter.Maximum != nil && value.Max > *parameter.Maximum {
+		return fmt.Errorf("invalid mapping range for target %s: maximum is out of range", target.Name)
+	}
+	return nil
+}
+
 // Set writes a numeric target. Voice targets require a valid voice index;
 // effect targets use the effect index fixed during resolution. Delay time is
 // represented to controls in seconds and stored as a duration.
 func (target Target) Set(model *Model, voiceIndex int, value float64) error {
 	if model == nil {
 		return fmt.Errorf("sound model is nil")
+	}
+	if target.IsSynth {
+		if target.SynthIndex < 0 || target.SynthIndex >= len(model.Synths) {
+			return fmt.Errorf("synth index %d out of range", target.SynthIndex)
+		}
+		if target.Mod {
+			if err := validateFinite(target.Name+" modulation", value); err != nil {
+				return err
+			}
+			if model.Synths[target.SynthIndex].Modulations == nil {
+				model.Synths[target.SynthIndex].Modulations = map[string]float64{}
+			}
+			model.Synths[target.SynthIndex].Modulations[target.Name] = value
+			return nil
+		}
+		if target.Vector {
+			if value < 0 || value > 1 {
+				return fmt.Errorf("invalid partial gain: out of range")
+			}
+			name := fmt.Sprintf("partial.%d.gain", voiceIndex)
+			if _, ok := model.Synths[target.SynthIndex].Parameters[name]; !ok {
+				return fmt.Errorf("partial index %d out of range", voiceIndex)
+			}
+			model.Synths[target.SynthIndex].Parameters[name] = value
+			return nil
+		}
+		parameter, ok := model.Synths[target.SynthIndex].Spec().Parameters[target.Name]
+		if !ok {
+			if strings.HasSuffix(target.Name, ".gain") && (value < 0 || value > 1) {
+				return fmt.Errorf("invalid %s: out of range", target.Name)
+			}
+			if strings.HasSuffix(target.Name, ".ratio") && value <= 0 {
+				return fmt.Errorf("invalid %s: must be positive", target.Name)
+			}
+			model.Synths[target.SynthIndex].Parameters[target.Name] = value
+			return nil
+		}
+		if parameter.Minimum != nil && ((*parameter.Minimum == 0 && isStrictPositive(target.Name) && value <= 0) || value < *parameter.Minimum) {
+			return fmt.Errorf("invalid %s: below minimum", target.Name)
+		}
+		if parameter.Maximum != nil && value > *parameter.Maximum {
+			return fmt.Errorf("invalid %s: above maximum", target.Name)
+		}
+		model.Synths[target.SynthIndex].Parameters[target.Name] = value
+		return nil
 	}
 	if err := target.validateValue(value); err != nil {
 		return err

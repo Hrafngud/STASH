@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/zalmo/stash/internal/audio"
@@ -158,7 +159,7 @@ func (engine *Engine) prepareSources(ctx context.Context, clock Clock, plan cli.
 		if name == "" {
 			name = plan.Command.Source
 		}
-		if isRhythmControl(name) || seen[name] {
+		if isRhythmControl(name) || strings.HasPrefix(name, "syn.") || seen[name] {
 			continue
 		}
 		seen[name] = true
@@ -209,11 +210,27 @@ func prepareModel(plan cli.Plan, primaryValues []float64) (sound.Model, error) {
 	if len(primaryValues) == 0 {
 		return sound.Model{}, fmt.Errorf("primary source sample has no values")
 	}
-	if len(plan.Sound.Voices) == 0 {
-		return sound.Model{}, fmt.Errorf("plan has no sound voice")
+	if len(plan.Sound.Voices) == 0 && len(plan.Sound.Synths) == 0 {
+		return sound.Model{}, fmt.Errorf("plan has no sound voice or synth")
 	}
 	model := sound.Model{
-		Effects: append([]sound.Effect(nil), plan.Sound.Effects...),
+		Effects: append([]sound.Effect(nil), plan.Sound.Effects...), MasterGain: plan.Sound.MasterGain, MasterGainSet: plan.Sound.MasterGainSet,
+		AudioRoutes: append([]sound.AudioRoute(nil), plan.Sound.AudioRoutes...),
+	}
+	if len(plan.Sound.Synths) > 0 {
+		model.Synths = cloneRuntimeSynths(plan.Sound.Synths)
+		for index := range model.Synths {
+			if len(plan.Command.Notes) > 0 {
+				model.Synths[index].Parameters["freq"] = plan.Command.Notes[0].Frequency()
+			}
+			if (plan.Command.Trigger != nil || plan.Command.Rhythm != nil) && model.Synths[index].Parameters["mix"] > 0 {
+				model.Synths[index].Parameters["gate"] = 0
+			}
+		}
+		if err := model.Validate(); err != nil {
+			return sound.Model{}, fmt.Errorf("invalid prepared sound model: %w", err)
+		}
+		return model, nil
 	}
 	base := plan.Sound.Voices[0]
 	voiceCount := 1
@@ -246,6 +263,30 @@ func prepareModel(plan cli.Plan, primaryValues []float64) (sound.Model, error) {
 		return sound.Model{}, fmt.Errorf("invalid prepared sound model: %w", err)
 	}
 	return model, nil
+}
+
+func cloneRuntimeSynths(input []sound.Synth) []sound.Synth {
+	output := make([]sound.Synth, len(input))
+	for index, synth := range input {
+		output[index] = synth
+		output[index].Parameters = map[string]float64{}
+		for name, value := range synth.Parameters {
+			output[index].Parameters[name] = value
+		}
+		output[index].Modulations = map[string]float64{}
+		for name, value := range synth.Modulations {
+			output[index].Modulations[name] = value
+		}
+		output[index].Config = map[string]string{}
+		for name, value := range synth.Config {
+			output[index].Config[name] = value
+		}
+		output[index].Explicit = map[string]bool{}
+		for name, value := range synth.Explicit {
+			output[index].Explicit[name] = value
+		}
+	}
+	return output
 }
 
 func (engine *Engine) sourceInterval(name string) (time.Duration, error) {

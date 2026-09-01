@@ -10,7 +10,7 @@ stash \- turn Linux system telemetry into sound
 .RI [ PREFIX ]
 .br
 .B stash \-i
-.I SOURCE
+.I NAME
 .br
 .B stash \-p
 .I PRIMITIVE
@@ -22,7 +22,7 @@ stash \- turn Linux system telemetry into sound
 (Sound Telemetry Auto SHell) reads live Linux hardware and operating-system
 telemetry.  With no sound-producing option it writes numeric samples to
 standard output.  Sound options turn the source into a control signal for a
-persistent oscillator, note events, rhythm, and an ordered effects chain.
+composable synth graph, note events, rhythm, and an ordered effects chain.
 Csound provides audio-device and raw-PCM synthesis.
 .PP
 .I SOURCE
@@ -42,18 +42,26 @@ Print a concise command reference to standard output and exit successfully.
 The help flag must be the only argument.
 .TP
 .BR \-l " [" PREFIX "]"
-List known sources, optionally restricted by a case-sensitive name prefix.
-Unavailable hardware-specific sources are identified as such.
+List known sources or synths, optionally restricted by a case-sensitive name
+prefix.  Use the prefix
+.B syn
+to list synths.  Unavailable hardware-specific sources are identified as such.
 .TP
-.BI \-i " SOURCE"
-Show a source's name, scalar or vector kind, unit, natural range, and local
-availability.
+.BI \-i " NAME"
+Inspect a source, or a synth such as
+.BR syn.fm .
 .TP
 .BI \-p " PRIMITIVE"
-Resolve and inspect a note, note list, scale, mode, or tempo-bearing rhythm.
+Resolve and inspect a note, note list, scale, mode, rhythm, or synth declaration.
 .SH OPTIONS
 Options in this section follow
 .IR SOURCE .
+.TP
+.BI \-s " TYPE[:ID][,PARAM=VALUE]..."
+Add a synth node.  Canonical types are sub, fm, pm, am, ring, add, wavetable,
+karplus, modal, and granular.  This option may be repeated; audible outputs
+are summed before filters and effects.  Omitted IDs are assigned from the type,
+for example sub, sub2, and so on.
 .TP
 .BI \-w " WAVE"
 Select
@@ -65,6 +73,9 @@ or
 .BR noise .
 The default is
 .BR sine .
+Following a synth declaration, this option sets that node's primary waveform
+and may be repeated after subsequent synth declarations.  Synths without a
+primary waveform reject this option.
 .TP
 .BI \-m " [CONTROL:]TARGET=MAP"
 Add a modulation.  Omitted
@@ -78,7 +89,8 @@ means the primary source.  This option may be repeated.
 .TP
 .BI \-v " GAIN"
 Set static output gain in the inclusive range 0 through 1.  The default is
-0.1.
+0.1 for the legacy voice.  With explicit synths this controls master gain,
+whose default is 1; each synth node's gain defaults to 0.1.
 .TP
 .BI \-t " TRIGGER"
 Define a threshold trigger:
@@ -140,6 +152,56 @@ amount are 0 through 1.  This option may be repeated.
 Write headerless raw PCM to standard output instead of using the default audio
 device.  The format is 48,000 Hz, two-channel, stereo-interleaved,
 little-endian float32.
+.SH SYNTH GRAPH
+A declaration has the form
+.BR TYPE[:ID][,PARAM=VALUE]... .
+Every synth has numeric
+.BR freq ,
+.BR gain ,
+.BR pan ,
+.BR gate ,
+and
+.B mix
+parameters.  Other parameters depend on the type.  Declaration assignments
+set fixed configuration or numeric base values.  Use
+.B stash \-i syn.TYPE
+to display configuration, parameter units, ranges, defaults, audio-rate
+support, and outputs for a type.
+.PP
+Subtractive synthesis uses type-specific parameters cutoff, q, and pulsewidth.
+FM and PM use ratio or modfreq, index, and feedback; AM uses ratio or modfreq
+and depth; ring uses ratio or modfreq.  Additive synthesis uses
+.BR partial.N.gain ,
+.BR partial.N.ratio ,
+and
+.BR partial.N.detune .
+Karplus uses excite, damping, feedback, and brightness.  Wavetable uses
+position and scan; modal uses excite, decay, brightness, and inharmonicity;
+granular uses density, size, position, pitch, jitter, and spread.
+.PP
+The wavetable type requires
+.BR table ,
+modal requires
+.BR model=metal|wood|glass|bell|plate ,
+and granular requires a
+.B sample
+path.  Additive
+.B partials
+defaults to 8 and accepts 1 through 128.  Oscillator types accept fixed
+.B wave
+and, where applicable,
+.B modwave
+configuration.  FM, PM, AM, and ring declarations may explicitly use either
+.B ratio
+or
+.BR modfreq ,
+but not both.
+.PP
+All declared synths use the envelope selected by
+.BR \-a .
+Unknown types or parameters, missing required configuration, duplicate IDs,
+invalid references, unsupported audio-rate targets, conflicting ratio and
+modfreq selection, and routing cycles are rejected before Csound starts.
 .SH MAPPINGS
 A map has the form:
 .PP
@@ -181,6 +243,23 @@ A control may be a telemetry source or, when a rhythm is active,
 .BR rhythm.velocity ,
 or
 .BR rhythm.phase .
+.PP
+A control may also be an audio-rate synth output named
+.BR syn.ID.out .
+Synth targets are
+.BR syn.PARAM ,
+.BR syn.ID.PARAM ,
+and their additive
+.B .mod
+forms.  Unqualified synth targets resolve to the most recently declared node.
+The unqualified targets freq, gain, pan, and gate do the same.  Telemetry and
+rhythm controls may target any numeric parameter; synth outputs may target only
+parameters reported as audio-rate capable by
+.BR "stash \-i syn.TYPE" .
+Setting
+.B mix=0
+keeps a synth output available for modulation while removing it from the
+audible master mix.  General routing cycles are rejected before Csound starts.
 .SH VALUE GRAMMAR
 Numbers are decimal and may use
 .BR k ,
@@ -224,12 +303,14 @@ audio and standard output remains empty.  With
 raw PCM is written to standard output.  Diagnostics always go to standard
 error.
 .SH EXAMPLES
-List CPU sources and inspect aggregate CPU usage:
+List CPU sources, list synths, and inspect aggregate CPU usage and FM synthesis:
 .PP
 .RS
 .nf
 stash \-l cpu
+stash \-l syn
 stash \-i cpu.usage
+stash \-i syn.fm
 .fi
 .RE
 .PP
@@ -238,6 +319,16 @@ Map CPU usage exponentially to a smoothed sine frequency:
 .RS
 .nf
 stash cpu.usage \-w sine \-m freq=80..2k/exp~150ms
+.fi
+.RE
+.PP
+Build a two-node synth graph, keeping the FM modulator out of the master mix:
+.PP
+.RS
+.nf
+stash cpu.usage \-s fm:mod,mix=0 \-s sub:voice,wave=saw \
+  \-m freq=80..220 \
+  \-m syn.mod.out:syn.voice.freq.mod=\-300..300
 .fi
 .RE
 .PP
@@ -257,7 +348,8 @@ stash cpu.cores.usage \-t above:95 \-n mode:E3:phrygian:12 \-d 150ms
 .fi
 .RE
 .SH DEFAULTS
-Waveform sine; frequency 440 Hz; gain 0.1; pan 0; mapping curve linear;
+Waveform sine; frequency 440 Hz; voice or node gain 0.1; explicit-synth master
+gain 1; pan 0; mapping curve linear;
 smoothing 0ms; event gate 100ms; ADSR 5ms,20ms,.8,50ms; filter Q 0.707;
 swing 50; sample rate 48,000 Hz; two output channels.
 .SH EXIT STATUS

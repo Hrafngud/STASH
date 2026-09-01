@@ -277,7 +277,16 @@ func (session *processSession) Update(ctx context.Context, update audio.Update) 
 	if err != nil {
 		return fmt.Errorf("csound update: %w", err)
 	}
-	event := fmt.Sprintf("i 2 0 0.001 %s %s\n", quote(channel), number(update.Value))
+	channelValue := update.Value
+	if update.Target.IsSynth {
+		synth := next.Synths[update.Target.SynthIndex]
+		name := update.Target.Name
+		if update.Target.Vector {
+			name = fmt.Sprintf("partial.%d.gain", update.VoiceIndex)
+		}
+		channelValue = synth.Parameters[name] + synth.Modulations[name]
+	}
+	event := fmt.Sprintf("i 2 0 0.001 %s %s\n", quote(channel), number(channelValue))
 	if _, err := io.WriteString(session.stdin, event); err != nil {
 		return fmt.Errorf("csound update: write control channel: %w", err)
 	}
@@ -316,6 +325,16 @@ func (session *processSession) Close() error {
 }
 
 func channelForTarget(target sound.Target, voiceIndex int) (string, error) {
+	if target.IsSynth {
+		if target.SynthIndex < 0 {
+			return "", fmt.Errorf("synth index %d out of range", target.SynthIndex)
+		}
+		name := target.Name
+		if target.Vector {
+			name = fmt.Sprintf("partial.%d.gain", voiceIndex)
+		}
+		return synthChannel(target.SynthIndex, name), nil
+	}
 	if target.EffectIndex < 0 {
 		switch target.Name {
 		case "freq", "gain", "pan", "gate":
@@ -348,10 +367,32 @@ func channelForTarget(target sound.Target, voiceIndex int) (string, error) {
 }
 
 func cloneModel(model sound.Model) sound.Model {
-	return sound.Model{
-		Voices:  append([]sound.Voice(nil), model.Voices...),
-		Effects: append([]sound.Effect(nil), model.Effects...),
+	cloned := sound.Model{
+		Voices:      append([]sound.Voice(nil), model.Voices...),
+		Effects:     append([]sound.Effect(nil), model.Effects...),
+		AudioRoutes: append([]sound.AudioRoute(nil), model.AudioRoutes...), MasterGain: model.MasterGain, MasterGainSet: model.MasterGainSet,
 	}
+	cloned.Synths = make([]sound.Synth, len(model.Synths))
+	for index, synth := range model.Synths {
+		cloned.Synths[index] = synth
+		cloned.Synths[index].Parameters = map[string]float64{}
+		for name, value := range synth.Parameters {
+			cloned.Synths[index].Parameters[name] = value
+		}
+		cloned.Synths[index].Modulations = map[string]float64{}
+		for name, value := range synth.Modulations {
+			cloned.Synths[index].Modulations[name] = value
+		}
+		cloned.Synths[index].Config = map[string]string{}
+		for name, value := range synth.Config {
+			cloned.Synths[index].Config[name] = value
+		}
+		cloned.Synths[index].Explicit = map[string]bool{}
+		for name, value := range synth.Explicit {
+			cloned.Synths[index].Explicit[name] = value
+		}
+	}
+	return cloned
 }
 
 func outputSummary(output []byte, fallback string) string {
