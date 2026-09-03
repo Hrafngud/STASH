@@ -3,11 +3,15 @@
 ## 1. Command form
 
 ```text
+stash
 stash SOURCE [OPTIONS]
 stash DISCOVERY
 stash -h
 stash --help
 ```
+
+With no arguments, `stash` opens the live instrument editor described in
+section 41. Every argument-bearing form retains the behavior below.
 
 `SOURCE` is either:
 
@@ -1415,3 +1419,63 @@ stash: 12 vector values require at least 12 notes; got 8
 ```
 
 No silent fallback is permitted for malformed syntax.
+
+## 41. Live instrument editor
+
+Running `stash` with no arguments opens a full-screen editor. Each non-empty
+line is exactly one clause of the ordinary CLI language: the first clause is a
+source and each remaining clause is one `OPTION VALUE` pair. Empty lines are
+temporary editing placeholders. The editor continuously compiles the lines to
+the same argv parser and planner used by argument-bearing invocations.
+
+Document states are:
+
+```text
+✓ valid       complete audio instrument
+… incomplete  useful prefix or a command without sound clauses
+✕ invalid     malformed or semantically invalid command
+```
+
+The last valid instrument keeps playing while text is incomplete or invalid.
+Changing numeric synth or effect parameters updates the persistent audio
+session without resetting oscillator phase. Source, control/routing, synth or
+effect topology, synth type, and fixed-configuration changes rebuild the graph
+inside the same STASH process.
+
+Normal-mode keys:
+
+```text
+Up / Down       select clause
+Enter           edit clause
+a               add clause below
+d               delete clause
+Ctrl+Up/Down    reorder clause
+Ctrl+N          add clause below
+Ctrl+P          add clause above
+Ctrl+G          export valid instrument and exit
+q / Ctrl+C      quit
+```
+
+Edit-mode keys:
+
+```text
+Tab             cycle semantic suggestions
+Up / Down       select suggestion
+Enter           accept suggestion, or finish when none is shown
+Escape          finish editing
+Left / Right    move text cursor
+Alt+Up/Down     nudge the numeric value under the cursor
+Ctrl+N/P        add a clause below/above
+```
+
+Completion is derived from registered sources and structured synth/effect
+metadata. Declared synth IDs, synth outputs, rhythm controls, effects, and only
+their valid parameter targets enter the relevant completion contexts.
+
+Export uses the ordinary shell-safe form:
+
+```bash
+stash cpu.usage \
+  -s fm:bass,ratio=2,index=7 \
+  -m syn.bass.freq=45..90/exp~120ms
+```

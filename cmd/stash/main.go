@@ -30,6 +30,9 @@ func run(ctx context.Context, args []string, input io.Reader, output, diagnostic
 			return finish(ctx, diagnostics, err)
 		}
 	}
+	if len(args) == 0 {
+		return finish(ctx, diagnostics, runner.RunInteractive(ctx, input, output, diagnostics))
+	}
 	return finish(ctx, diagnostics, runner.Run(ctx, args, output, diagnostics))
 }
 

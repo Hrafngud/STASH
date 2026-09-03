@@ -12,11 +12,16 @@ const HelpText = `STASH — Sound Telemetry Auto SHell
 Turn live Linux hardware and operating-system telemetry into sound.
 
 Usage:
+  stash
   stash SOURCE [OPTIONS]
   stash -l [PREFIX]
   stash -i NAME
   stash -p PRIMITIVE
   stash -h | --help
+
+Interactive editor:
+  No arguments                    Open the live multiline instrument editor
+  Ctrl-G                          Export an ordinary stash command and exit
 
 Sources:
   SOURCE                         Canonical source name, such as cpu.usage
@@ -56,6 +61,7 @@ MAP is MIN..MAX[/linear|exp|log][~TIME]. Every numeric effect parameter is a tar
 With no sound option, SOURCE writes telemetry samples to stdout.
 
 Examples:
+  stash
   stash -l cpu
   stash -i cpu.usage
   stash cpu.usage -w sine -m freq=80..2k/exp~150ms

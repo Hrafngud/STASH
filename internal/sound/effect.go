@@ -141,6 +141,19 @@ func LookupEffectSpec(kind EffectKind) (EffectSpec, bool) {
 	return spec, ok
 }
 
+// EffectSpecs returns the public effect registry in discovery order. The
+// returned slice and its nested parameter/positional slices are independent
+// copies so interactive consumers cannot mutate parser metadata.
+func EffectSpecs() []EffectSpec {
+	result := make([]EffectSpec, len(effectSpecs))
+	for index, spec := range effectSpecs {
+		result[index] = spec
+		result[index].Parameters = append([]EffectParameter(nil), spec.Parameters...)
+		result[index].Positional = append([]string(nil), spec.Positional...)
+	}
+	return result
+}
+
 func EffectParameterNames(effect Effect) []string {
 	spec, ok := LookupEffectSpec(effect.Kind)
 	if !ok {

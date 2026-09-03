@@ -19,6 +19,7 @@ import (
 	"github.com/zalmo/stash/internal/source/linuxproc"
 	stdinsource "github.com/zalmo/stash/internal/source/stdin"
 	"github.com/zalmo/stash/internal/telemetry"
+	"github.com/zalmo/stash/internal/tui"
 )
 
 // Runner contains the process-independent dependencies for one command.
@@ -30,6 +31,26 @@ type Runner struct {
 	SampleInterval func(string) time.Duration
 	RhythmInterval time.Duration
 	MaxDelay       time.Duration
+}
+
+// RunInteractive opens the no-argument live instrument editor. Its clauses
+// are parsed and planned by the same cli package used by Run.
+func (runner *Runner) RunInteractive(ctx context.Context, input io.Reader, output, diagnostics io.Writer) error {
+	if runner == nil || runner.Registry == nil {
+		return fmt.Errorf("execute interactive: runner or source registry is nil")
+	}
+	command, exported, err := tui.Run(ctx, tui.Config{
+		Registry: runner.Registry, Backend: runner.Backend, Input: input, Output: output, Diagnostics: diagnostics,
+		SampleInterval: runner.SampleInterval, RhythmInterval: runner.RhythmInterval, MaxDelay: runner.MaxDelay,
+	})
+	if err != nil {
+		return err
+	}
+	if exported {
+		_, err = fmt.Fprintln(output, command)
+		return err
+	}
+	return nil
 }
 
 // NewDefault detects the local Linux telemetry sources, registers stdin, and

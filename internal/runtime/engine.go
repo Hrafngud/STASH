@@ -33,6 +33,10 @@ type Engine struct {
 	PCM            io.Writer
 	Diagnostics    io.Writer
 	MaxDelay       time.Duration
+	// ExternalUpdates carries editor-originated numeric changes into the same
+	// serialized control loop as telemetry and rhythm updates. A nil channel
+	// disables live patching.
+	ExternalUpdates <-chan []audio.Update
 }
 
 // Run preflights all controls and the first primary sample before starting one
@@ -120,6 +124,9 @@ func (engine *Engine) Run(ctx context.Context, plan cli.Plan) error {
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	state.updateContext = workerCtx
 	events := make(chan runtimeEvent, 64)
+	if engine.ExternalUpdates != nil {
+		go externalUpdateLoop(workerCtx, engine.ExternalUpdates, events)
+	}
 	for _, name := range order {
 		item := prepared[name]
 		go collectLoop(workerCtx, clock, item, intervals[name], events)
@@ -376,6 +383,7 @@ const (
 	eventRhythm
 	eventGateOff
 	eventRenderer
+	eventExternal
 )
 
 type runtimeEvent struct {
@@ -386,6 +394,24 @@ type runtimeEvent struct {
 	err        error
 	voiceIndex int
 	generation uint64
+	updates    []audio.Update
+}
+
+func externalUpdateLoop(ctx context.Context, updates <-chan []audio.Update, events chan<- runtimeEvent) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case batch, ok := <-updates:
+			if !ok {
+				return
+			}
+			copied := append([]audio.Update(nil), batch...)
+			if !sendEvent(ctx, events, runtimeEvent{kind: eventExternal, updates: copied}) {
+				return
+			}
+		}
+	}
 }
 
 func collectLoop(ctx context.Context, clock Clock, item *preparedSource, interval time.Duration, events chan<- runtimeEvent) {

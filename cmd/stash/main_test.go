@@ -88,3 +88,18 @@ func TestRunRejectsHelpCombinedWithOtherArguments(t *testing.T) {
 		t.Fatalf("stderr = %q, want unknown-option diagnostic", stderr.String())
 	}
 }
+
+func TestRunWithoutArgumentsOpensInteractiveEditor(t *testing.T) {
+	runner := &app.Runner{Registry: source.NewRegistry()}
+	var stdout, stderr bytes.Buffer
+	exitCode := run(context.Background(), nil, strings.NewReader("q"), &stdout, &stderr, runner)
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr = %q", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "STASH — live instrument") {
+		t.Fatalf("stdout does not contain TUI heading: %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}

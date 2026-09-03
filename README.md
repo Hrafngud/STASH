@@ -33,6 +33,19 @@ Manjaro or Arch Linux, run:
 
 ## Quick start
 
+Open the live instrument editor by running STASH without arguments:
+
+```bash
+stash
+```
+
+The Bubble Tea editor starts with a playable instrument, keeps each existing
+CLI clause on its own line, and offers context-sensitive source, synth, effect,
+control, and target completion. Numeric synth/effect edits are applied to the
+running audio session; structural edits rebuild the graph inside the same
+process. Press `Ctrl+G` to export the current editor contents as an ordinary
+multiline `stash` command.
+
 Read aggregate CPU usage as machine-oriented numeric lines:
 
 ```bash

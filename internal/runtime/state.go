@@ -520,6 +520,12 @@ func (state *controlState) run(ctx context.Context, clock Clock, events chan run
 						return err
 					}
 				}
+			case eventExternal:
+				for _, update := range event.updates {
+					if err := state.update(update.Target, update.VoiceIndex, update.Value); err != nil {
+						return fmt.Errorf("apply live update: %w", err)
+					}
+				}
 			}
 		}
 	}

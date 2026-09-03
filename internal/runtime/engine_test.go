@@ -197,6 +197,50 @@ func immediateEngine(registry *source.Registry, backend audio.Backend) *Engine {
 	}
 }
 
+func TestExternalUpdatesReachPersistentSession(t *testing.T) {
+	origin := time.Unix(10, 0)
+	collector := &blockingCollector{first: source.ScalarSample{Value: 50, Time: origin}}
+	registry := source.NewRegistry()
+	registerCollector(t, registry, rangedInfo("cpu.usage", source.KindScalar), collector)
+	backend := newFakeBackend()
+	plan := buildPlan(t, registry, "cpu.usage", "-s", "fm:bass,index=4")
+	updates := make(chan []audio.Update, 1)
+	engine := immediateEngine(registry, backend)
+	engine.ExternalUpdates = updates
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- engine.Run(ctx, plan) }()
+	select {
+	case <-backend.started:
+	case <-time.After(time.Second):
+		t.Fatal("backend did not start")
+	}
+
+	updates <- []audio.Update{{
+		Target: sound.Target{Name: "index", EffectIndex: -1, IsSynth: true, SynthIndex: 0},
+		Value:  9,
+	}}
+	deadline := time.After(time.Second)
+	for {
+		got := backend.session.snapshot()
+		if len(got) > 0 {
+			if got[len(got)-1].Target.Name != "index" || got[len(got)-1].Value != 9 {
+				t.Fatalf("last update = %#v", got[len(got)-1])
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("external update did not reach session")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
 func TestScalarMappingSmoothsExplicitDeltasWithoutRestartingBackend(t *testing.T) {
 	t.Parallel()
 	origin := time.Unix(10, 0)

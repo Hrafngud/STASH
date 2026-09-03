@@ -3,6 +3,8 @@
 stash \- turn Linux system telemetry into sound
 .SH SYNOPSIS
 .B stash
+.br
+.B stash
 .I SOURCE
 .RI [ OPTIONS ]
 .br
@@ -24,6 +26,30 @@ telemetry.  With no sound-producing option it writes numeric samples to
 standard output.  Sound options turn the source into a control signal for a
 composable synth graph, note events, rhythm, and an ordered effects chain.
 Csound provides audio-device and raw-PCM synthesis.
+.PP
+With no arguments,
+.B stash
+opens the live instrument editor.  Each line is one ordinary CLI clause;
+semantic completion is derived from registered sources and the synth/effect
+registries.  Numeric synth and effect edits update the persistent audio
+session, while structural edits rebuild the graph inside the same process.
+.SH LIVE INSTRUMENT EDITOR
+The editor starts with a playable instrument when an available telemetry
+source exists.  It marks the document valid, incomplete, or invalid and keeps
+the last valid instrument playing through intermediate edits.
+.PP
+In normal mode, Up and Down select a clause, Enter edits,
+.B a
+adds below,
+.B d
+deletes, Ctrl-Up and Ctrl-Down reorder, and Ctrl-G exports the instrument as an
+ordinary multiline shell command.  Ctrl-N and Ctrl-P add below or above.
+.PP
+In edit mode, Tab cycles semantic completions, Up and Down select one, Enter
+accepts it, Escape finishes editing, arrows move the cursor, and Alt-Up or
+Alt-Down nudges the numeric value under the cursor.  Press
+.B q
+in normal mode or Ctrl-C to quit.
 .PP
 .I SOURCE
 is a canonical source name such as
