@@ -215,6 +215,8 @@ func TestBuildPlanAcceptsRangesAndAllDocumentedControlsAndTargets(t *testing.T) 
 		{"cpu.usage", "-r", "rhythm:120:1/8:x-", "-f", "lp:1k", "-m", "rhythm.velocity:filter.cutoff=80..2k"},
 		{"cpu.usage", "-r", "rhythm:120:1/8:x-", "-f", "hp:80", "-m", "rhythm.phase:filter.q=.1..1"},
 		{"cpu.usage", "-x", "delay:100ms,.2,.3", "-m", "delay.time=1..2"},
+		{"cpu.usage", "-x", "delay:100ms,.2,.3", "-m", "delay.time=10ms..200ms"},
+		{"cpu.usage", "-x", "flanger:rate=.2,depth=5ms,feedback=.3", "-m", "flanger.depth=1ms..15ms"},
 		{"cpu.usage", "-x", "delay:100ms,.2,.3", "-m", "delay.feedback=0..0.9"},
 		{"cpu.usage", "-x", "delay:100ms,.2,.3", "-m", "delay.mix=0..1"},
 		{"cpu.usage", "-x", "drive:.2", "-m", "drive.amount=0..1"},

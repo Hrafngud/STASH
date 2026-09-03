@@ -503,25 +503,34 @@ syn.ID.PARAM.mod
 The valid parameters, units, ranges, and audio-rate support depend on the
 synth type and are shown by `stash -i syn.TYPE`.
 
-Initial filter targets:
+Effect targets follow one rule:
 
 ```text
-filter.cutoff
-filter.q
+EFFECT.PARAMETER
 ```
 
-Initial delay targets:
+Every numeric parameter is a legal destination. Current target families are:
 
 ```text
-delay.time
-delay.feedback
-delay.mix
-```
-
-Initial drive target:
-
-```text
-drive.amount
+filter.cutoff  filter.q  filter.gain
+delay.time  delay.feedback  delay.mix  drive.amount
+chorus.rate  chorus.depth  chorus.mix
+flanger.rate  flanger.depth  flanger.feedback  flanger.mix
+phaser.rate  phaser.depth  phaser.feedback  phaser.stages
+reverb.size  reverb.damp  reverb.mix
+tremolo.rate  tremolo.depth
+pan.position  pan.rate  pan.depth  width.amount  haas.delay
+crush.bits  crush.rate  shape.drive  shape.bias  fold.amount
+comb.delay  comb.feedback  allpass.delay  allpass.feedback
+comp.threshold  comp.ratio  comp.attack  comp.release
+limiter.threshold  limiter.release
+gate.threshold  gate.attack  gate.release
+reson.freq  reson.q  ring.freq  ring.mix  freqshift.amount  freqshift.mix
+formant.position  pitch.semitones  pitch.mix
+stutter.size  stutter.repeats  stutter.prob
+grain.size  grain.density  grain.jitter  grain.pitch  grain.mix
+freeze.amount  spectral.blur.amount  spectral.blur.mix
+spectral.shift.amount  spectral.shift.mix  conv.mix
 ```
 
 When multiple effects of the same type exist, an unindexed target addresses the most recently declared matching effect.
@@ -1132,43 +1141,40 @@ Syntax:
 -x EFFECT
 ```
 
-### Delay
+Both positional and named arguments are accepted. The effect set is:
 
 ```text
-delay:TIME,FEEDBACK,MIX
+delay:TIME,FEEDBACK,MIX              drive:AMOUNT
+chorus:RATE,DEPTH,MIX                flanger:RATE,DEPTH,FEEDBACK[,MIX]
+phaser:RATE,DEPTH,STAGES[,FEEDBACK]  reverb:SIZE,DAMP,MIX
+tremolo:RATE,DEPTH                   pan:POSITION
+autopan:RATE,DEPTH                   width:AMOUNT  haas:DELAY
+crush:BITS,RATE                      bitcrush:BITS  downsample:RATE
+shape:DRIVE,BIAS                     fold:AMOUNT
+comb:DELAY,FEEDBACK                  allpass:DELAY,FEEDBACK
+comp:THRESHOLD,RATIO,ATTACK,RELEASE  limiter:THRESHOLD[,RELEASE]
+gate:THRESHOLD,ATTACK,RELEASE        reson:FREQ,Q
+ring:FREQ,MIX                        freqshift:AMOUNT[,MIX]
+formant:POSITION                     pitch:SEMITONES[,MIX]
+stutter:SIZE,REPEATS,PROB            grain:SIZE,DENSITY,JITTER,PITCH,MIX
+freeze:AMOUNT                        spectral.freeze:AMOUNT
+spectral.blur:AMOUNT[,MIX]
+spectral.shift:AMOUNT[,MIX]          conv:IMPULSE[,MIX]
 ```
 
-Example:
+Named forms are recommended when an effect has several controls:
 
 ```bash
--x delay:150ms,.4,.25
+-x chorus:rate=.8,depth=.3,mix=.25
+-x flanger:rate=.2,depth=5ms,feedback=.4
+-x comp:threshold=-12db,ratio=4,attack=5ms,release=80ms
+-x formant:vowel=a
+-x pitch:ratio=1.5
 ```
 
-Constraints:
-
-```text
-TIME > 0
-FEEDBACK = 0..0.95
-MIX = 0..1
-```
-
-### Drive
-
-```text
-drive:AMOUNT
-```
-
-Example:
-
-```bash
--x drive:.5
-```
-
-Constraint:
-
-```text
-AMOUNT = 0..1
-```
+Waveshaper curves are `tanh`, `clip`, and `atan`. Formant vowels are `a`, `e`,
+`i`, `o`, and `u`. `bitcrush`, `downsample`, `autopan`, and `waveshaper` are
+convenience aliases. Effects are appended and processed in declaration order.
 
 Effects are appended in declaration order.
 

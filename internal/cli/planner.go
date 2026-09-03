@@ -234,6 +234,27 @@ func validateMappingUnit(model sound.Model, target sound.Target, outputUnit stri
 	unitName := ""
 	if target.IsSynth {
 		unitName = model.Synths[target.SynthIndex].Spec().Parameters[target.Name].Unit
+	} else if target.EffectIndex >= 0 && target.EffectIndex < len(model.Effects) {
+		spec, ok := sound.LookupEffectSpec(model.Effects[target.EffectIndex].Kind)
+		separator := strings.LastIndexByte(target.Name, '.')
+		if ok && separator >= 0 {
+			name := target.Name[separator+1:]
+			for _, parameter := range spec.Parameters {
+				if parameter.Name == name {
+					unitName = parameter.Unit
+					break
+				}
+			}
+		}
+		// Effect times retain support for legacy bare-second maps while also
+		// accepting explicit ms/s ranges.
+		if unitName == "s" {
+			return nil
+		}
+		if outputUnit == "time" {
+			return fmt.Errorf("target %s does not accept a time-valued map", target.Name)
+		}
+		return nil
 	}
 	if unitName == "s" && outputUnit != "time" {
 		return fmt.Errorf("time-valued target %s requires a time-valued map", target.Name)

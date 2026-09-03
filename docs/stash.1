@@ -135,18 +135,20 @@ Set alternating-subdivision swing from 50 through 75 percent.  The default is
 .TP
 .BI \-f " FILTER"
 Append
-.B lp:CUTOFF[,Q]
-or
-.B hp:CUTOFF[,Q]
-to the effects chain.  The default Q is 0.707.  This option may be repeated.
+.BR lp ,
+.BR hp ,
+.BR bp ,
+.BR notch ,
+.BR peak ,
+or low/high shelf filters to the effects chain.  The default Q is 0.707.
+This option may be repeated.
 .TP
 .BI \-x " EFFECT"
-Append
-.B delay:TIME,FEEDBACK,MIX
-or
-.B drive:AMOUNT
-to the effects chain.  Delay feedback is 0 through 0.95; delay mix and drive
-amount are 0 through 1.  This option may be repeated.
+Append an effect to the chain.  Effects include delay, drive, chorus, flanger,
+phaser, reverb, tremolo, pan/autopan, width, Haas delay, crushing, waveshaping,
+comb/allpass, dynamics, resonator, ring/frequency shifting, folding, formant,
+pitch, stutter, granular, freeze, spectral processing, and convolution.
+Both positional and named arguments are accepted.  This option may be repeated.
 .TP
 .B \-o \-
 Write headerless raw PCM to standard output instead of using the default audio
@@ -225,14 +227,14 @@ Signal targets are
 .BR pan ,
 and
 .BR gate .
-Effect targets are
-.BR filter.cutoff ,
-.BR filter.q ,
-.BR delay.time ,
-.BR delay.feedback ,
-.BR delay.mix ,
-and
-.BR drive.amount .
+Every numeric effect parameter is a modulation target named
+.BR EFFECT.PARAMETER ,
+for example
+.BR phaser.rate ,
+.BR reverb.size ,
+.BR reson.freq ,
+or
+.BR crush.bits .
 When several matching effects exist, an unindexed target addresses the most
 recently declared matching effect.
 .PP

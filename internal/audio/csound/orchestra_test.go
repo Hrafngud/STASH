@@ -109,6 +109,87 @@ func TestGeneratedOrchestraPassesInstalledCsoundSyntaxCheck(t *testing.T) {
 	}
 }
 
+func TestGeneratedEffectOrchestrasPassInstalledCsoundSyntaxCheck(t *testing.T) {
+	executable, err := exec.LookPath("csound")
+	if err != nil {
+		t.Skip("Csound is not installed")
+	}
+	declarations := []string{
+		"chorus:rate=.8,depth=.3,mix=.25", "flanger:rate=.2,depth=5ms,feedback=.4", "phaser:rate=.3,depth=.7,stages=6",
+		"reverb:size=.7,damp=.4,mix=.25", "tremolo:6,.5", "pan:rate=.3,depth=1", "width:1.5", "haas:12ms",
+		"crush:bits=8,rate=12k", "shape:drive=.5,curve=tanh", "comb:12ms,.6", "allpass:12ms,.6",
+		"comp:threshold=-12,ratio=4,attack=5ms,release=80ms", "limiter:-1db", "gate:-35db,5ms,80ms",
+		"reson:440,12", "ring:80,.5", "freqshift:30", "fold:.4", "formant:vowel=a", "pitch:+7st",
+		"stutter:size=80ms,repeats=4", "grain:size=80ms,density=12,jitter=.2,pitch=1",
+		"freeze:.8", "spectral.blur:.4", "spectral.shift:120",
+	}
+	impulse := filepath.Join(t.TempDir(), "impulse.wav")
+	if err := writeSilentWAV(impulse); err != nil {
+		t.Fatal(err)
+	}
+	declarations = append(declarations, "conv:"+impulse+",.4")
+	for _, declaration := range declarations {
+		declaration := declaration
+		t.Run(declaration, func(t *testing.T) {
+			effect, err := sound.ParseEffect(declaration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			model := sound.Model{Voices: []sound.Voice{sound.DefaultVoice()}, Effects: []sound.Effect{effect}}
+			document, _, err := orchestra(audio.Config{Model: model, Output: audio.OutputDevice})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "effect.csd")
+			if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			command := exec.Command(executable, "-n", "-d", "-m0", "--syntax-check-only", path)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("Csound syntax check: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestInstalledCsoundRendersExpandedEffectChain(t *testing.T) {
+	executable, err := exec.LookPath("csound")
+	if err != nil {
+		t.Skip("Csound is not installed")
+	}
+	declarations := []string{
+		"chorus:.8,.3,.25", "flanger:.2,5ms,.4", "phaser:.3,.7,6", "reverb:.7,.4,.2",
+		"tremolo:4,.2", "pan:rate=.2,depth=.5", "crush:12,24k", "shape:.2,0", "comb:8ms,.2",
+		"reson:440,8", "ring:30,.2", "freqshift:5,.2", "fold:.1", "pitch:+1st,.2",
+		"stutter:40ms,2,.2", "grain:20ms,8,.1,1,.2", "spectral.blur:.05,.2",
+	}
+	effects := make([]sound.Effect, 0, len(declarations))
+	for _, declaration := range declarations {
+		effect, err := sound.ParseEffect(declaration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		effects = append(effects, effect)
+	}
+	writer := &countingWriter{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := New(executable).Start(ctx, audio.Config{Model: sound.Model{Voices: []sound.Voice{sound.DefaultVoice()}, Effects: effects}, Output: audio.OutputRawPCM, PCM: writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for writer.Count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if writer.Count() == 0 {
+		t.Fatal("expanded effect chain produced no PCM")
+	}
+}
+
 func TestInstalledCsoundRendersHeaderlessRawPCM(t *testing.T) {
 	executable, err := exec.LookPath("csound")
 	if err != nil {

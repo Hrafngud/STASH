@@ -172,3 +172,62 @@ func TestTargetValueReadsVoiceAndEffectState(t *testing.T) {
 		t.Fatal("out-of-range voice read succeeded")
 	}
 }
+
+func TestEveryExpandedEffectNumberIsAModulationTarget(t *testing.T) {
+	t.Parallel()
+	declarations := []string{
+		"chorus:rate=.8,depth=.3,mix=.25", "flanger:rate=.2,depth=5ms,feedback=.4", "phaser:rate=.3,depth=.7,stages=6",
+		"reverb:size=.7,damp=.4,mix=.25", "tremolo:6,.5", "pan:rate=.3,depth=1", "width:1.5", "haas:12ms",
+		"crush:bits=8,rate=12k", "shape:drive=.5,bias=0", "comb:12ms,.6", "allpass:12ms,.6",
+		"comp:threshold=-12,ratio=4,attack=5ms,release=80ms", "limiter:-1db", "gate:-35db,5ms,80ms",
+		"reson:440,12", "ring:80,.5", "freqshift:30", "fold:.4", "formant:vowel=a", "pitch:+7st",
+		"stutter:size=80ms,repeats=4", "grain:size=80ms,density=12,jitter=.2,pitch=1", "freeze:.8",
+		"spectral.blur:.4", "spectral.shift:120", "conv:impulse.wav,.4",
+	}
+	for _, declaration := range declarations {
+		effect, err := sound.ParseEffect(declaration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec, _ := sound.LookupEffectSpec(effect.Kind)
+		model := sound.Model{Voices: []sound.Voice{sound.DefaultVoice()}, Effects: []sound.Effect{effect}}
+		for _, parameter := range spec.Parameters {
+			name := spec.Target + "." + parameter.Name
+			target, err := sound.ResolveTarget(model.Effects, name)
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+				continue
+			}
+			value, err := target.Value(model, 0)
+			if err != nil {
+				t.Errorf("%s value: %v", name, err)
+				continue
+			}
+			if err := target.Set(&model, 0, value); err != nil {
+				t.Errorf("%s set: %v", name, err)
+			}
+		}
+	}
+}
+
+func TestEveryExpandedFilterNumberIsAModulationTarget(t *testing.T) {
+	t.Parallel()
+	for _, declaration := range []string{"bp:800,4", "notch:1.2k,8", "peak:2k,6,9db", "shelf.low:200,6db", "shelf.high:8k,-4db"} {
+		effect, err := sound.ParseFilter(declaration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec, _ := sound.LookupEffectSpec(effect.Kind)
+		for _, parameter := range spec.Parameters {
+			name := "filter." + parameter.Name
+			target, err := sound.ResolveTarget([]sound.Effect{effect}, name)
+			if err != nil {
+				t.Errorf("%s %s: %v", declaration, name, err)
+				continue
+			}
+			if _, err := target.Value(sound.Model{Effects: []sound.Effect{effect}}, 0); err != nil {
+				t.Errorf("%s value: %v", name, err)
+			}
+		}
+	}
+}

@@ -55,6 +55,49 @@ func TestParseEffects(t *testing.T) {
 	}
 }
 
+func TestParseExpandedEffectsAndNamedParameters(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input     string
+		kind      sound.EffectKind
+		parameter string
+		want      float64
+	}{
+		{"chorus:rate=.8,depth=.3,mix=.25", sound.EffectChorus, "depth", .3},
+		{"flanger:rate=.2,depth=5ms,feedback=.4", sound.EffectFlanger, "depth", .005},
+		{"phaser:rate=.3,depth=.7,stages=6", sound.EffectPhaser, "stages", 6},
+		{"reverb:size=.7,damp=.4,mix=.25", sound.EffectReverb, "size", .7},
+		{"autopan:.2,.9", sound.EffectPan, "rate", .2},
+		{"crush:bits=8,rate=12k", sound.EffectCrush, "rate", 12000},
+		{"shape:drive=.5,curve=tanh", sound.EffectShape, "drive", .5},
+		{"comp:threshold=-12,ratio=4,attack=5ms,release=80ms", sound.EffectCompressor, "release", .08},
+		{"reson:440,12", sound.EffectResonator, "q", 12},
+		{"pitch:ratio=1.5", sound.EffectPitch, "semitones", 7.019550008653876},
+		{"spectral.shift:120", sound.EffectSpectralShift, "amount", 120},
+	}
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			effect, err := sound.ParseEffect(test.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, ok := effect.Parameter(test.parameter)
+			if effect.Kind != test.kind || !ok || value != test.want {
+				t.Fatalf("ParseEffect(%q) = %#v, %s=%v", test.input, effect, test.parameter, value)
+			}
+		})
+	}
+}
+
+func TestParseExpandedFilters(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"bp:800,4", "notch:1.2k,8", "peak:2k,6,9db", "shelf.low:200,6db", "shelf.high:8k,-4db"} {
+		if _, err := sound.ParseFilter(input); err != nil {
+			t.Errorf("ParseFilter(%q): %v", input, err)
+		}
+	}
+}
+
 func TestEffectParsersRejectMalformedOrOutOfRangeValues(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -63,11 +106,11 @@ func TestEffectParsersRejectMalformedOrOutOfRangeValues(t *testing.T) {
 		want   string
 	}{
 		{filter: true, input: "lp", want: "invalid filter"},
-		{filter: true, input: "bp:1k", want: "unknown filter"},
+		{filter: true, input: "tilt:1k", want: "unknown filter"},
 		{filter: true, input: "lp:0", want: "greater than zero"},
 		{filter: true, input: "hp:80,0", want: "greater than zero"},
 		{filter: true, input: "lp:1k,.7,2", want: "invalid filter"},
-		{input: "chorus:.2", want: "unknown effect"},
+		{input: "teleport:.2", want: "unknown effect"},
 		{input: "delay:0ms,.2,.3", want: "greater than zero"},
 		{input: "delay:1ms,.951,.3", want: "between 0 and 0.95"},
 		{input: "delay:1ms,.2,1.1", want: "between 0 and 1"},

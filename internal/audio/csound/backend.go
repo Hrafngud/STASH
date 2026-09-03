@@ -285,6 +285,11 @@ func (session *processSession) Update(ctx context.Context, update audio.Update) 
 			name = fmt.Sprintf("partial.%d.gain", update.VoiceIndex)
 		}
 		channelValue = synth.Parameters[name] + synth.Modulations[name]
+	} else if update.Target.EffectIndex >= 0 {
+		channelValue, err = update.Target.Value(next, update.VoiceIndex)
+		if err != nil {
+			return fmt.Errorf("csound update: %w", err)
+		}
 	}
 	event := fmt.Sprintf("i 2 0 0.001 %s %s\n", quote(channel), number(channelValue))
 	if _, err := io.WriteString(session.stdin, event); err != nil {
@@ -346,23 +351,11 @@ func channelForTarget(target sound.Target, voiceIndex int) (string, error) {
 			return "", fmt.Errorf("unknown voice target %q", target.Name)
 		}
 	}
-	parameter := ""
-	switch target.Name {
-	case "filter.cutoff":
-		parameter = "cutoff"
-	case "filter.q":
-		parameter = "q"
-	case "delay.time":
-		parameter = "time"
-	case "delay.feedback":
-		parameter = "feedback"
-	case "delay.mix":
-		parameter = "mix"
-	case "drive.amount":
-		parameter = "amount"
-	default:
+	separator := strings.LastIndexByte(target.Name, '.')
+	if separator < 0 || separator == len(target.Name)-1 {
 		return "", fmt.Errorf("unknown effect target %q", target.Name)
 	}
+	parameter := target.Name[separator+1:]
 	return effectChannel(target.EffectIndex, parameter), nil
 }
 
@@ -390,6 +383,16 @@ func cloneModel(model sound.Model) sound.Model {
 		cloned.Synths[index].Explicit = map[string]bool{}
 		for name, value := range synth.Explicit {
 			cloned.Synths[index].Explicit[name] = value
+		}
+	}
+	for index := range cloned.Effects {
+		cloned.Effects[index].Parameters = map[string]float64{}
+		for name, value := range model.Effects[index].Parameters {
+			cloned.Effects[index].Parameters[name] = value
+		}
+		cloned.Effects[index].Config = map[string]string{}
+		for name, value := range model.Effects[index].Config {
+			cloned.Effects[index].Config[name] = value
 		}
 	}
 	return cloned

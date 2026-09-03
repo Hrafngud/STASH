@@ -425,16 +425,16 @@ func writeVoiceInitializers(text *strings.Builder, index int, voice sound.Voice)
 }
 
 func writeEffectInitializers(text *strings.Builder, index int, effect sound.Effect) {
-	switch effect.Kind {
-	case sound.EffectLowPass, sound.EffectHighPass:
-		fmt.Fprintf(text, "  chnset %s, %s\n", number(effect.Cutoff), quote(effectChannel(index, "cutoff")))
-		fmt.Fprintf(text, "  chnset %s, %s\n", number(effect.Q), quote(effectChannel(index, "q")))
-	case sound.EffectDelay:
-		fmt.Fprintf(text, "  chnset %s, %s\n", number(effect.DelayTime.Seconds()), quote(effectChannel(index, "time")))
-		fmt.Fprintf(text, "  chnset %s, %s\n", number(effect.Feedback), quote(effectChannel(index, "feedback")))
-		fmt.Fprintf(text, "  chnset %s, %s\n", number(effect.Mix), quote(effectChannel(index, "mix")))
-	case sound.EffectDrive:
-		fmt.Fprintf(text, "  chnset %s, %s\n", number(effect.Amount), quote(effectChannel(index, "amount")))
+	spec, ok := sound.LookupEffectSpec(effect.Kind)
+	if !ok {
+		return
+	}
+	for _, parameter := range spec.Parameters {
+		value, exists := effect.Parameter(parameter.Name)
+		if !exists {
+			value = parameter.Default
+		}
+		fmt.Fprintf(text, "  chnset %s, %s\n", number(value), quote(effectChannel(index, parameter.Name)))
 	}
 }
 
@@ -477,16 +477,22 @@ func writeOutputInstrument(text *strings.Builder, effects []sound.Effect, maxDel
 `)
 	for index, effect := range effects {
 		switch effect.Kind {
-		case sound.EffectLowPass, sound.EffectHighPass:
-			mode := 0
-			if effect.Kind == sound.EffectHighPass {
-				mode = 1
-			}
+		case sound.EffectLowPass, sound.EffectHighPass, sound.EffectBandPass, sound.EffectNotch, sound.EffectPeak, sound.EffectLowShelf, sound.EffectHighShelf:
+			mode := map[sound.EffectKind]int{sound.EffectLowPass: 0, sound.EffectHighPass: 1, sound.EffectBandPass: 2, sound.EffectNotch: 3, sound.EffectPeak: 4, sound.EffectLowShelf: 5, sound.EffectHighShelf: 6}[effect.Kind]
 			fmt.Fprintf(text, "  kCutoff%d chnget %s\n", index, quote(effectChannel(index, "cutoff")))
-			fmt.Fprintf(text, "  kQ%d chnget %s\n", index, quote(effectChannel(index, "q")))
+			if effect.Kind == sound.EffectLowShelf || effect.Kind == sound.EffectHighShelf {
+				fmt.Fprintf(text, "  kQ%d = %s\n", index, number(sound.DefaultFilterQ))
+			} else {
+				fmt.Fprintf(text, "  kQ%d chnget %s\n", index, quote(effectChannel(index, "q")))
+			}
+			if effect.Kind == sound.EffectPeak || effect.Kind == sound.EffectLowShelf || effect.Kind == sound.EffectHighShelf {
+				fmt.Fprintf(text, "  kFilterGain%d chnget %s\n", index, quote(effectChannel(index, "gain")))
+			} else {
+				fmt.Fprintf(text, "  kFilterGain%d = 0\n", index)
+			}
 			fmt.Fprintf(text, "  kCutoff%d limit kCutoff%d, 1, (sr * 0.499)\n", index, index)
-			fmt.Fprintf(text, "  aLeft rbjeq aLeft, kCutoff%d, 0, kQ%d, %d\n", index, index, mode)
-			fmt.Fprintf(text, "  aRight rbjeq aRight, kCutoff%d, 0, kQ%d, %d\n", index, index, mode)
+			fmt.Fprintf(text, "  aLeft rbjeq aLeft, kCutoff%d, kFilterGain%d, kQ%d, %d\n", index, index, index, mode)
+			fmt.Fprintf(text, "  aRight rbjeq aRight, kCutoff%d, kFilterGain%d, kQ%d, %d\n", index, index, index, mode)
 		case sound.EffectDelay:
 			fmt.Fprintf(text, "  kDelayTime%d chnget %s\n", index, quote(effectChannel(index, "time")))
 			fmt.Fprintf(text, "  kFeedback%d chnget %s\n", index, quote(effectChannel(index, "feedback")))
@@ -504,6 +510,112 @@ func writeOutputInstrument(text *strings.Builder, effects []sound.Effect, maxDel
 			fmt.Fprintf(text, "  kDrive%d chnget %s\n", index, quote(effectChannel(index, "amount")))
 			fmt.Fprintf(text, "  aLeft = (aLeft * (1 - kDrive%d)) + (tanh(aLeft * 10) * kDrive%d)\n", index, index)
 			fmt.Fprintf(text, "  aRight = (aRight * (1 - kDrive%d)) + (tanh(aRight * 10) * kDrive%d)\n", index, index)
+		case sound.EffectChorus:
+			writeEffectChannels(text, index, "rate", "depth", "mix")
+			fmt.Fprintf(text, "  aChorusLFO%d oscili (.001 + (kDepth%d * .014)), kRate%d, giStashSine\n", index, index, index)
+			fmt.Fprintf(text, "  aChorusLeft%d vdelay3 aLeft, (aChorusLFO%d + .016) * 1000, 31\n", index, index)
+			fmt.Fprintf(text, "  aChorusRight%d vdelay3 aRight, (-aChorusLFO%d + .016) * 1000, 31\n", index, index)
+			writeWetMix(text, index, "aChorusLeft", "aChorusRight", "Mix")
+		case sound.EffectFlanger:
+			writeEffectChannels(text, index, "rate", "depth", "feedback", "mix")
+			fmt.Fprintf(text, "  aFlangerLFO%d oscili kDepth%d * .5, kRate%d, giStashSine\n", index, index, index)
+			fmt.Fprintf(text, "  aFlangerLeft%d flanger aLeft, (.0001 + (kDepth%d * .5) + aFlangerLFO%d), kFeedback%d, .1\n", index, index, index, index)
+			fmt.Fprintf(text, "  aFlangerRight%d flanger aRight, (.0001 + (kDepth%d * .5) - aFlangerLFO%d), kFeedback%d, .1\n", index, index, index, index)
+			writeWetMix(text, index, "aFlangerLeft", "aFlangerRight", "Mix")
+		case sound.EffectPhaser:
+			writeEffectChannels(text, index, "rate", "depth", "feedback", "stages")
+			fmt.Fprintf(text, "  kPhaserFreq%d = 100 + ((.5 + (.5 * sin(2 * 3.141592653589793 * kRate%d * timeinsts()))) * kDepth%d * 3900)\n", index, index, index)
+			fmt.Fprintf(text, "  aLeft phaser1 aLeft, kPhaserFreq%d, kStages%d, kFeedback%d\n", index, index, index)
+			fmt.Fprintf(text, "  aRight phaser1 aRight, kPhaserFreq%d, kStages%d, kFeedback%d\n", index, index, index)
+		case sound.EffectReverb:
+			writeEffectChannels(text, index, "size", "damp", "mix")
+			fmt.Fprintf(text, "  aReverbLeft%d, aReverbRight%d reverbsc aLeft, aRight, (.5 + (kSize%d * .49)), (1000 + ((1 - kDamp%d) * 17000))\n", index, index, index, index)
+			writeWetMix(text, index, "aReverbLeft", "aReverbRight", "Mix")
+		case sound.EffectTremolo:
+			writeEffectChannels(text, index, "rate", "depth")
+			fmt.Fprintf(text, "  kTremolo%d oscili 1, kRate%d, giStashSine\n  kTremoloGain%d = (1 - kDepth%d) + (kDepth%d * ((kTremolo%d + 1) * .5))\n", index, index, index, index, index, index)
+			fmt.Fprintf(text, "  aLeft = aLeft * kTremoloGain%d\n  aRight = aRight * kTremoloGain%d\n", index, index)
+		case sound.EffectPan:
+			writeEffectChannels(text, index, "position", "rate", "depth")
+			fmt.Fprintf(text, "  kPanLFO%d oscili kDepth%d, max(kRate%d, .000001), giStashSine\n  if (kRate%d <= 0) then\n    kPanLFO%d = 0\n  endif\n  kPanPosition%d limit (kPosition%d + kPanLFO%d), -1, 1\n", index, index, index, index, index, index, index, index)
+			fmt.Fprintf(text, "  aPanMid%d = (aLeft + aRight) * .7071067811865476\n  aLeft = aPanMid%d * sqrt((1 - kPanPosition%d) * .5)\n  aRight = aPanMid%d * sqrt((1 + kPanPosition%d) * .5)\n", index, index, index, index, index)
+		case sound.EffectWidth:
+			writeEffectChannels(text, index, "amount")
+			fmt.Fprintf(text, "  aWidthMid%d = (aLeft + aRight) * .5\n  aWidthSide%d = (aLeft - aRight) * .5 * kAmount%d\n  aLeft = aWidthMid%d + aWidthSide%d\n  aRight = aWidthMid%d - aWidthSide%d\n", index, index, index, index, index, index, index)
+		case sound.EffectHaas:
+			writeEffectChannels(text, index, "delay")
+			fmt.Fprintf(text, "  aRight vdelay3 aRight, kDelay%d * 1000, 51\n", index)
+		case sound.EffectCrush:
+			writeEffectChannels(text, index, "bits", "rate")
+			fmt.Fprintf(text, "  kCrushLevels%d = pow(2, kBits%d - 1)\n  aCrushLeft%d samphold aLeft, mpulse(1, 1 / max(kRate%d, 100))\n  aCrushRight%d samphold aRight, mpulse(1, 1 / max(kRate%d, 100))\n  aLeft = round(aCrushLeft%d * kCrushLevels%d) / kCrushLevels%d\n  aRight = round(aCrushRight%d * kCrushLevels%d) / kCrushLevels%d\n", index, index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectShape:
+			writeEffectChannels(text, index, "drive", "bias")
+			curve := effect.Config["curve"]
+			if curve == "clip" {
+				fmt.Fprintf(text, "  aLeft limit (aLeft * (1 + (kDrive%d * 20))) + kBias%d, -1, 1\n  aRight limit (aRight * (1 + (kDrive%d * 20))) + kBias%d, -1, 1\n", index, index, index, index)
+			} else if curve == "atan" {
+				fmt.Fprintf(text, "  aLeft = (2 / 3.141592653589793) * taninv((aLeft + kBias%d) * (1 + (kDrive%d * 20)))\n  aRight = (2 / 3.141592653589793) * taninv((aRight + kBias%d) * (1 + (kDrive%d * 20)))\n", index, index, index, index)
+			} else {
+				fmt.Fprintf(text, "  aLeft = tanh((aLeft + kBias%d) * (1 + (kDrive%d * 20)))\n  aRight = tanh((aRight + kBias%d) * (1 + (kDrive%d * 20)))\n", index, index, index, index)
+			}
+		case sound.EffectComb:
+			writeEffectChannels(text, index, "delay", "feedback")
+			fmt.Fprintf(text, "  aCombBufferLeft%d delayr 1\n  aCombLeft%d deltap3 max(kDelay%d, .0001)\n  delayw aLeft + (aCombLeft%d * kFeedback%d)\n  aCombBufferRight%d delayr 1\n  aCombRight%d deltap3 max(kDelay%d, .0001)\n  delayw aRight + (aCombRight%d * kFeedback%d)\n  aLeft = aLeft + aCombLeft%d\n  aRight = aRight + aCombRight%d\n", index, index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectAllpass:
+			writeEffectChannels(text, index, "delay", "feedback")
+			fmt.Fprintf(text, "  aAllpassBufferLeft%d delayr 1\n  aAllpassTapLeft%d deltap3 max(kDelay%d, .0001)\n  delayw aLeft + (aAllpassTapLeft%d * kFeedback%d)\n  aAllpassOutLeft%d = aAllpassTapLeft%d - (aLeft * kFeedback%d)\n  aAllpassBufferRight%d delayr 1\n  aAllpassTapRight%d deltap3 max(kDelay%d, .0001)\n  delayw aRight + (aAllpassTapRight%d * kFeedback%d)\n  aAllpassOutRight%d = aAllpassTapRight%d - (aRight * kFeedback%d)\n  aLeft = aAllpassOutLeft%d\n  aRight = aAllpassOutRight%d\n", index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectCompressor:
+			writeEffectChannels(text, index, "threshold", "ratio", "attack", "release")
+			fmt.Fprintf(text, "  aCompControl%d = max(abs(aLeft), abs(aRight))\n  aLeft compress aLeft, aCompControl%d, kThreshold%d, kThreshold%d + 3, 0, kRatio%d, kAttack%d, kRelease%d, .01\n  aRight compress aRight, aCompControl%d, kThreshold%d, kThreshold%d + 3, 0, kRatio%d, kAttack%d, kRelease%d, .01\n", index, index, index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectLimiter:
+			writeEffectChannels(text, index, "threshold", "release")
+			fmt.Fprintf(text, "  aLimitControl%d = max(abs(aLeft), abs(aRight))\n  aLeft compress aLeft, aLimitControl%d, kThreshold%d, kThreshold%d, 0, 100, .001, kRelease%d, .005\n  aRight compress aRight, aLimitControl%d, kThreshold%d, kThreshold%d, 0, 100, .001, kRelease%d, .005\n", index, index, index, index, index, index, index, index, index)
+		case sound.EffectGate:
+			writeEffectChannels(text, index, "threshold", "attack", "release")
+			fmt.Fprintf(text, "  aGateEnvelope%d follow2 max(abs(aLeft), abs(aRight)), kAttack%d, kRelease%d\n  kGateEnvelope%d downsamp aGateEnvelope%d\n  if (kGateEnvelope%d >= ampdb(kThreshold%d)) then\n    kGateGain%d = 1\n  else\n    kGateGain%d = 0\n  endif\n  aLeft = aLeft * kGateGain%d\n  aRight = aRight * kGateGain%d\n", index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectResonator:
+			writeEffectChannels(text, index, "freq", "q")
+			fmt.Fprintf(text, "  aLeft reson aLeft, kFreq%d, max(kFreq%d / kQ%d, 1)\n  aRight reson aRight, kFreq%d, max(kFreq%d / kQ%d, 1)\n", index, index, index, index, index, index)
+		case sound.EffectRing:
+			writeEffectChannels(text, index, "freq", "mix")
+			fmt.Fprintf(text, "  aRing%d oscili 1, kFreq%d, giStashSine\n  aLeft = (aLeft * (1 - kMix%d)) + (aLeft * aRing%d * kMix%d)\n  aRight = (aRight * (1 - kMix%d)) + (aRight * aRing%d * kMix%d)\n", index, index, index, index, index, index, index, index)
+		case sound.EffectFrequencyShift:
+			writeEffectChannels(text, index, "amount", "mix")
+			fmt.Fprintf(text, "  aRealL%d, aImagL%d hilbert aLeft\n  aRealR%d, aImagR%d hilbert aRight\n  aShiftCos%d oscili 1, abs(kAmount%d), giStashSine, .25\n  aShiftSin%d oscili 1, abs(kAmount%d), giStashSine\n  aShiftLeft%d = (aRealL%d * aShiftCos%d) - (aImagL%d * aShiftSin%d * (kAmount%d >= 0 ? 1 : -1))\n  aShiftRight%d = (aRealR%d * aShiftCos%d) - (aImagR%d * aShiftSin%d * (kAmount%d >= 0 ? 1 : -1))\n", index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index)
+			writeWetMix(text, index, "aShiftLeft", "aShiftRight", "Mix")
+		case sound.EffectFold:
+			writeEffectChannels(text, index, "amount")
+			fmt.Fprintf(text, "  aLeft = (2 / 3.141592653589793) * sininv(sin(aLeft * (1 + (kAmount%d * 8))))\n  aRight = (2 / 3.141592653589793) * sininv(sin(aRight * (1 + (kAmount%d * 8))))\n", index, index)
+		case sound.EffectFormant:
+			writeEffectChannels(text, index, "position")
+			fmt.Fprintf(text, "  kFormant1_%d = 800 - (530 * kPosition%d)\n  kFormant2_%d = 1150 + (1140 * kPosition%d)\n  aFormantL1_%d reson aLeft, kFormant1_%d, 100\n  aFormantL2_%d reson aLeft, kFormant2_%d, 140\n  aFormantR1_%d reson aRight, kFormant1_%d, 100\n  aFormantR2_%d reson aRight, kFormant2_%d, 140\n  aLeft = (aFormantL1_%d + aFormantL2_%d) * .5\n  aRight = (aFormantR1_%d + aFormantR2_%d) * .5\n", index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectPitch:
+			writeEffectChannels(text, index, "semitones", "mix")
+			fmt.Fprintf(text, "  fPitchLeft%d pvsanal aLeft, 1024, 256, 1024, 1\n  fPitchRight%d pvsanal aRight, 1024, 256, 1024, 1\n  fPitchScaledLeft%d pvscale fPitchLeft%d, pow(2, kSemitones%d / 12)\n  fPitchScaledRight%d pvscale fPitchRight%d, pow(2, kSemitones%d / 12)\n  aPitchLeft%d pvsynth fPitchScaledLeft%d\n  aPitchRight%d pvsynth fPitchScaledRight%d\n", index, index, index, index, index, index, index, index, index, index, index, index)
+			writeWetMix(text, index, "aPitchLeft", "aPitchRight", "Mix")
+		case sound.EffectFreeze:
+			writeEffectChannels(text, index, "amount")
+			fmt.Fprintf(text, "  fFreezeLeft%d pvsanal aLeft, 1024, 256, 1024, 1\n  fFreezeRight%d pvsanal aRight, 1024, 256, 1024, 1\n  fFrozenLeft%d pvsfreeze fFreezeLeft%d, kAmount%d, kAmount%d\n  fFrozenRight%d pvsfreeze fFreezeRight%d, kAmount%d, kAmount%d\n  aLeft pvsynth fFrozenLeft%d\n  aRight pvsynth fFrozenRight%d\n", index, index, index, index, index, index, index, index, index, index, index, index)
+		case sound.EffectSpectralBlur:
+			writeEffectChannels(text, index, "amount", "mix")
+			fmt.Fprintf(text, "  fBlurLeft%d pvsanal aLeft, 1024, 256, 1024, 1\n  fBlurRight%d pvsanal aRight, 1024, 256, 1024, 1\n  fBlurredLeft%d pvsblur fBlurLeft%d, kAmount%d, 2\n  fBlurredRight%d pvsblur fBlurRight%d, kAmount%d, 2\n  aBlurLeft%d pvsynth fBlurredLeft%d\n  aBlurRight%d pvsynth fBlurredRight%d\n", index, index, index, index, index, index, index, index, index, index, index, index)
+			writeWetMix(text, index, "aBlurLeft", "aBlurRight", "Mix")
+		case sound.EffectSpectralShift:
+			writeEffectChannels(text, index, "amount", "mix")
+			fmt.Fprintf(text, "  fSpecShiftLeft%d pvsanal aLeft, 1024, 256, 1024, 1\n  fSpecShiftRight%d pvsanal aRight, 1024, 256, 1024, 1\n  fShiftedLeft%d pvshift fSpecShiftLeft%d, kAmount%d, 0\n  fShiftedRight%d pvshift fSpecShiftRight%d, kAmount%d, 0\n  aSpecShiftLeft%d pvsynth fShiftedLeft%d\n  aSpecShiftRight%d pvsynth fShiftedRight%d\n", index, index, index, index, index, index, index, index, index, index, index, index)
+			writeWetMix(text, index, "aSpecShiftLeft", "aSpecShiftRight", "Mix")
+		case sound.EffectStutter:
+			writeEffectChannels(text, index, "size", "repeats", "prob")
+			fmt.Fprintf(text, "  kStutterPhase%d phasor 1 / max(kSize%d * kRepeats%d, .001)\n  kStutterSlice%d = frac(kStutterPhase%d * kRepeats%d)\n  kStutterTap%d = max(kSize%d * (1 - kStutterSlice%d), .0001)\n  aStutterLeft%d vdelay3 aLeft, kStutterTap%d * 1000, 2001\n  aStutterRight%d vdelay3 aRight, kStutterTap%d * 1000, 2001\n  if (kRepeats%d > 1) then\n    kStutterMix%d = kProb%d\n  else\n    kStutterMix%d = 0\n  endif\n", index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index)
+			writeWetMix(text, index, "aStutterLeft", "aStutterRight", "StutterMix")
+		case sound.EffectGranular:
+			writeEffectChannels(text, index, "size", "density", "jitter", "pitch", "mix")
+			fmt.Fprintf(text, "  kGrainJitter%d randomi -kJitter%d, kJitter%d, max(kDensity%d, .1)\n  kGrainDelay%d = max(kSize%d * (1 + kGrainJitter%d) / max(kPitch%d, .125), .0001)\n  aGrainLeft%d vdelay3 aLeft, kGrainDelay%d * 1000, 1001\n  aGrainRight%d vdelay3 aRight, kGrainDelay%d * 1000, 1001\n", index, index, index, index, index, index, index, index, index, index, index, index)
+			writeWetMix(text, index, "aGrainLeft", "aGrainRight", "Mix")
+		case sound.EffectConvolution:
+			writeEffectChannels(text, index, "mix")
+			fmt.Fprintf(text, "  aConvLeft%d pconvolve aLeft, %s\n  aConvRight%d pconvolve aRight, %s\n", index, quote(effect.Config["impulse"]), index, quote(effect.Config["impulse"]))
+			writeWetMix(text, index, "aConvLeft", "aConvRight", "Mix")
 		}
 	}
 	if !masterGainSet {
@@ -511,6 +623,17 @@ func writeOutputInstrument(text *strings.Builder, effects []sound.Effect, maxDel
 	}
 	fmt.Fprintf(text, "  aLeft = aLeft * %s\n  aRight = aRight * %s\n", number(masterGain), number(masterGain))
 	text.WriteString("  outs aLeft, aRight\nendin\n\n")
+}
+
+func writeEffectChannels(text *strings.Builder, index int, names ...string) {
+	for _, name := range names {
+		fmt.Fprintf(text, "  k%s%d chnget %s\n", csName(name), index, quote(effectChannel(index, name)))
+	}
+}
+
+func writeWetMix(text *strings.Builder, index int, left, right, mix string) {
+	fmt.Fprintf(text, "  aLeft = (aLeft * (1 - k%s%d)) + (%s%d * k%s%d)\n", mix, index, left, index, mix, index)
+	fmt.Fprintf(text, "  aRight = (aRight * (1 - k%s%d)) + (%s%d * k%s%d)\n", mix, index, right, index, mix, index)
 }
 
 func voiceInstrument(index int) int {

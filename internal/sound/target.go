@@ -116,22 +116,15 @@ func (target Target) Value(model Model, voiceIndex int) (float64, error) {
 	if !targetMatchesEffect(target.Name, effect.Kind) {
 		return 0, fmt.Errorf("target %s does not match effect %d kind %s", target.Name, target.EffectIndex, effect.Kind)
 	}
-	switch target.Name {
-	case "filter.cutoff":
-		return effect.Cutoff, nil
-	case "filter.q":
-		return effect.Q, nil
-	case "delay.time":
-		return effect.DelayTime.Seconds(), nil
-	case "delay.feedback":
-		return effect.Feedback, nil
-	case "delay.mix":
-		return effect.Mix, nil
-	case "drive.amount":
-		return effect.Amount, nil
-	default:
+	parameter, ok := effectParameterName(effect.Kind, target.Name)
+	if !ok {
 		return 0, fmt.Errorf("target %s is not an effect target", target.Name)
 	}
+	value, ok := effect.Parameter(parameter)
+	if !ok {
+		return 0, fmt.Errorf("effect %d has no parameter %s", target.EffectIndex, parameter)
+	}
+	return value, nil
 }
 
 // ResolveModelTarget resolves synth, legacy voice, and effect targets. An
@@ -204,21 +197,18 @@ func ResolveTarget(effects []Effect, name string) (Target, error) {
 	switch name {
 	case "freq", "gain", "pan", "gate":
 		return Target{Name: name, EffectIndex: -1}, nil
-	case "filter.cutoff", "filter.q":
-		return resolveLastEffect(effects, name, func(kind EffectKind) bool {
-			return kind == EffectLowPass || kind == EffectHighPass
-		}, "filter")
-	case "delay.time", "delay.feedback", "delay.mix":
-		return resolveLastEffect(effects, name, func(kind EffectKind) bool {
-			return kind == EffectDelay
-		}, "delay")
-	case "drive.amount":
-		return resolveLastEffect(effects, name, func(kind EffectKind) bool {
-			return kind == EffectDrive
-		}, "drive")
-	default:
+	}
+	known, required := false, ""
+	for _, spec := range effectSpecs {
+		if _, ok := effectParameterName(spec.Kind, name); ok {
+			known, required = true, spec.Target
+			break
+		}
+	}
+	if !known {
 		return Target{}, fmt.Errorf("unknown modulation target %q", name)
 	}
+	return resolveLastEffect(effects, name, func(kind EffectKind) bool { return targetMatchesEffect(name, kind) }, required)
 }
 
 func resolveLastEffect(effects []Effect, name string, matches func(EffectKind) bool, required string) (Target, error) {
@@ -255,20 +245,19 @@ func (target Target) ValidateRange(value unit.Range) error {
 		err = validateBoundedRange("pan", value, -1, 1)
 	case "gate":
 		err = validateBoundedRange("gate", value, 0, 1)
-	case "filter.cutoff":
-		err = validatePositiveRange("filter cutoff", value)
-	case "filter.q":
-		err = validatePositiveRange("filter Q", value)
-	case "delay.time":
-		err = validatePositiveRange("delay time", value)
-	case "delay.feedback":
-		err = validateBoundedRange("delay feedback", value, 0, 0.95)
-	case "delay.mix":
-		err = validateBoundedRange("delay mix", value, 0, 1)
-	case "drive.amount":
-		err = validateBoundedRange("drive amount", value, 0, 1)
 	default:
-		err = fmt.Errorf("unknown modulation target %q", target.Name)
+		parameter, ok := parameterForTarget(target.Name)
+		if !ok {
+			err = fmt.Errorf("unknown modulation target %q", target.Name)
+			break
+		}
+		if parameter.StrictPositive && value.Min <= 0 {
+			err = fmt.Errorf("%s must be greater than zero", target.Name)
+			break
+		}
+		if parameter.Minimum != nil && value.Min < *parameter.Minimum || parameter.Maximum != nil && value.Max > *parameter.Maximum {
+			err = fmt.Errorf("%s must be between %v and %v", target.Name, boundText(parameter.Minimum), boundText(parameter.Maximum))
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("invalid mapping range for target %s: %w", target.Name, err)
@@ -408,59 +397,68 @@ func (target Target) Set(model *Model, voiceIndex int, value float64) error {
 	if !targetMatchesEffect(target.Name, effect.Kind) {
 		return fmt.Errorf("target %s does not match effect %d kind %s", target.Name, target.EffectIndex, effect.Kind)
 	}
-	switch target.Name {
-	case "filter.cutoff":
-		effect.Cutoff = value
-	case "filter.q":
-		effect.Q = value
-	case "delay.time":
-		effect.DelayTime = time.Duration(value * float64(time.Second))
-	case "delay.feedback":
-		effect.Feedback = value
-	case "delay.mix":
-		effect.Mix = value
-	case "drive.amount":
-		effect.Amount = value
-	default:
+	parameter, ok := effectParameterName(effect.Kind, target.Name)
+	if !ok {
 		return fmt.Errorf("target %s is not an effect target", target.Name)
 	}
-	return nil
+	return effect.SetParameter(parameter, value)
 }
 
 func (target Target) validateValue(value float64) error {
 	switch target.Name {
-	case "freq", "filter.cutoff", "filter.q":
+	case "freq":
 		return validateGreaterThanZero(target.Name, value)
-	case "delay.time":
-		if err := validateGreaterThanZero(target.Name, value); err != nil {
-			return err
-		}
-		if value > float64(time.Duration(1<<63-1))/float64(time.Second) {
-			return fmt.Errorf("invalid delay.time: duration is too large")
-		}
-		return nil
-	case "gain", "gate", "delay.mix", "drive.amount":
+	case "gain", "gate":
 		return validateRange(target.Name, value, 0, 1)
 	case "pan":
 		return validateRange(target.Name, value, -1, 1)
-	case "delay.feedback":
-		return validateRange(target.Name, value, 0, 0.95)
 	default:
-		return fmt.Errorf("unknown modulation target %q", target.Name)
+		parameter, ok := parameterForTarget(target.Name)
+		if !ok {
+			return fmt.Errorf("unknown modulation target %q", target.Name)
+		}
+		if parameter.Unit == "s" && value > float64(time.Duration(1<<63-1))/float64(time.Second) {
+			return fmt.Errorf("invalid %s: duration is too large", target.Name)
+		}
+		if err := validateEffectParameter(parameter, value); err != nil {
+			return fmt.Errorf("invalid %s: %w", target.Name, err)
+		}
+		return nil
 	}
 }
 
 func targetMatchesEffect(name string, kind EffectKind) bool {
-	switch name {
-	case "filter.cutoff", "filter.q":
-		return kind == EffectLowPass || kind == EffectHighPass
-	case "delay.time", "delay.feedback", "delay.mix":
-		return kind == EffectDelay
-	case "drive.amount":
-		return kind == EffectDrive
-	default:
-		return false
+	_, ok := effectParameterName(kind, name)
+	return ok
+}
+
+func effectParameterName(kind EffectKind, target string) (string, bool) {
+	spec, ok := LookupEffectSpec(kind)
+	if !ok {
+		return "", false
 	}
+	for _, parameter := range spec.Parameters {
+		if target == spec.Target+"."+parameter.Name {
+			return parameter.Name, true
+		}
+	}
+	return "", false
+}
+
+func parameterForTarget(target string) (EffectParameter, bool) {
+	for _, spec := range effectSpecs {
+		if parameter, ok := effectParameterName(spec.Kind, target); ok {
+			return specParameter(spec, parameter)
+		}
+	}
+	return EffectParameter{}, false
+}
+
+func boundText(value *float64) any {
+	if value == nil {
+		return "infinity"
+	}
+	return *value
 }
 
 func validatePositiveRange(name string, value unit.Range) error {

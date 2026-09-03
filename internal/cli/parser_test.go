@@ -185,10 +185,10 @@ func TestParseRejectsMalformedArgv(t *testing.T) {
 		{name: "bad ADSR sustain", args: []string{"cpu.usage", "-a", "5ms,20ms,2,50ms"}, want: "ADSR sustain"},
 		{name: "bad swing", args: []string{"cpu.usage", "--swing", "49"}, want: "invalid swing"},
 		{name: "bad filter", args: []string{"cpu.usage", "-f", "lp:0"}, want: "filter cutoff"},
-		{name: "unknown filter", args: []string{"cpu.usage", "-f", "bp:1k"}, want: "unknown filter"},
+		{name: "unknown filter", args: []string{"cpu.usage", "-f", "tilt:1k"}, want: "unknown filter"},
 		{name: "bad delay", args: []string{"cpu.usage", "-x", "delay:0ms,.2,.3"}, want: "greater than zero"},
 		{name: "bad drive", args: []string{"cpu.usage", "-x", "drive:2"}, want: "drive amount"},
-		{name: "unknown effect", args: []string{"cpu.usage", "-x", "reverb:.2"}, want: "unknown effect"},
+		{name: "unknown effect", args: []string{"cpu.usage", "-x", "teleport:.2"}, want: "unknown effect"},
 		{name: "unsupported output", args: []string{"cpu.usage", "-o", "speaker"}, want: "only - is supported"},
 	}
 	for _, test := range tests {

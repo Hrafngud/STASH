@@ -45,14 +45,14 @@ Notes and rhythm:
   --swing AMOUNT                 Swing percentage, from 50 to 75
 
 Effects and output:
-  -f FILTER                      lp:CUTOFF[,Q] or hp:CUTOFF[,Q] (repeatable)
-  -x EFFECT                      delay:TIME,FEEDBACK,MIX or drive:AMOUNT (repeatable)
+  -f FILTER                      lp, hp, bp, notch, peak, or shelf filter (repeatable)
+  -x EFFECT                      Add an ordered DSP effect; named args supported (repeatable)
   -o -                           Write raw 48 kHz stereo float32 PCM to stdout
 
 Synth types: sub, fm, pm, am, ring, add, wavetable, karplus, modal, granular.
 Targets are syn.PARAM or syn.ID.PARAM; additive inputs end in .mod.
 Each synth exposes an audio-rate control named syn.ID.out.
-MAP is MIN..MAX[/linear|exp|log][~TIME]. Effects keep declaration order.
+MAP is MIN..MAX[/linear|exp|log][~TIME]. Every numeric effect parameter is a target.
 With no sound option, SOURCE writes telemetry samples to stdout.
 
 Examples:

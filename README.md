@@ -77,6 +77,17 @@ Sonify CPU usage through the default audio device:
 stash cpu.usage -w saw -m freq=80..1k/exp~100ms -f lp:3k -x drive:.2
 ```
 
+Turn telemetry into effect motion. Effect arguments may be positional or
+named, and every numeric argument automatically becomes a modulation target:
+
+```bash
+stash cpu.usage -w saw \
+  -x phaser:rate=.3,depth=.7,feedback=.2,stages=6 \
+  -x reverb:size=.7,damp=.4,mix=.25 \
+  -m phaser.rate=.05..4 \
+  -m reverb.size=.2..0.95
+```
+
 Build an audio-rate modular patch while keeping the modulator silent in the
 master mix:
 

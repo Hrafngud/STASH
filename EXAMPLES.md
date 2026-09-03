@@ -842,7 +842,7 @@ The earlier rhythm examples cover `rhythm.phase` and `rhythm.velocity`; the
 filter example covers `rhythm.gate`. These commands add explicit `gate`,
 `rhythm.hit`, and `rhythm.step` mappings.
 
-## 56. Modulate every effect parameter
+## 56. Modulate effect parameters automatically
 
 ```bash
 stash ram.used \
@@ -853,13 +853,18 @@ stash ram.used \
   -x delay:150ms,.2,.2 \
   -m cpu.usage:delay.time=.04..0.4 \
   -m cpu.usage:delay.mix=.05..0.7 \
-  -x drive:.15 \
-  -m cpu.usage:drive.amount=.05..0.7
+  -x phaser:rate=.3,depth=.6,feedback=.2,stages=6 \
+  -m cpu.usage:phaser.rate=.05..4 \
+  -m gpu.usage:phaser.depth=.1..1 \
+  -x reverb:size=.6,damp=.4,mix=.2 \
+  -m ram.used:reverb.size=.2..0.95 \
+  -x crush:bits=12,rate=24k \
+  -m cpu.usage:crush.bits=3..16
 ```
 
-Along with the earlier `filter.cutoff` and `delay.feedback` examples, this
-covers every modulatable filter, delay, and drive parameter. Unindexed effect
-targets bind to the most recently declared matching effect.
+Every numeric argument exposed by an effect automatically follows the same
+`effect.parameter` convention. Unindexed targets bind to the most recently
+declared matching effect.
 
 ## 57. Capability coverage index
 
