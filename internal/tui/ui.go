@@ -11,10 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/zalmo/stash/internal/audio"
+	"github.com/zalmo/stash/internal/cli"
 	"github.com/zalmo/stash/internal/source"
 	"github.com/zalmo/stash/internal/unit"
 )
@@ -32,20 +34,25 @@ type Config struct {
 }
 
 type editor struct {
-	config      Config
-	lines       []string
-	active      int
-	editing     bool
-	input       textinput.Model
-	suggestions []Suggestion
-	selected    int
-	analysis    Analysis
-	message     string
-	width       int
-	height      int
-	exported    bool
-	live        *liveEngine
-	backendLog  *diagnosticCapture
+	config       Config
+	lines        []string
+	active       int
+	editing      bool
+	input        textinput.Model
+	suggestions  []Suggestion
+	selected     int
+	analysis     Analysis
+	lastValid    *cli.Plan
+	message      string
+	width        int
+	height       int
+	exported     bool
+	muted        bool
+	enhancedKeys bool
+	numberChosen bool
+	chosenNumber numericRange
+	live         *liveEngine
+	backendLog   *diagnosticCapture
 }
 
 type runtimeTick time.Time
@@ -53,30 +60,35 @@ type runtimeTick time.Time
 const runtimePollInterval = 100 * time.Millisecond
 
 var (
-	accentColor  = lipgloss.AdaptiveColor{Light: "#5B21B6", Dark: "#C4A7E7"}
-	cyanColor    = lipgloss.AdaptiveColor{Light: "#0369A1", Dark: "#7DD3FC"}
-	greenColor   = lipgloss.AdaptiveColor{Light: "#15803D", Dark: "#86EFAC"}
-	yellowColor  = lipgloss.AdaptiveColor{Light: "#A16207", Dark: "#FDE68A"}
-	redColor     = lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#FCA5A5"}
-	mutedColor   = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#8B93A7"}
-	borderColor  = lipgloss.AdaptiveColor{Light: "#D1D5DB", Dark: "#414559"}
-	surfaceColor = lipgloss.AdaptiveColor{Light: "#F3F4F6", Dark: "#24273A"}
+	accentColor  = adaptiveColor("#5B21B6", "#C4A7E7")
+	cyanColor    = adaptiveColor("#0369A1", "#7DD3FC")
+	greenColor   = adaptiveColor("#15803D", "#86EFAC")
+	yellowColor  = adaptiveColor("#A16207", "#FDE68A")
+	redColor     = adaptiveColor("#B91C1C", "#FCA5A5")
+	mutedColor   = adaptiveColor("#6B7280", "#8B93A7")
+	borderColor  = adaptiveColor("#D1D5DB", "#414559")
+	surfaceColor = adaptiveColor("#F3F4F6", "#24273A")
 
-	logoStyle        = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	subtitleStyle    = lipgloss.NewStyle().Foreground(mutedColor)
-	sectionStyle     = lipgloss.NewStyle().Bold(true).Foreground(cyanColor)
-	panelStyle       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(borderColor).Padding(0, 1)
-	activeLineStyle  = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	mutedStyle       = lipgloss.NewStyle().Foreground(mutedColor)
-	selectedStyle    = lipgloss.NewStyle().Bold(true).Foreground(accentColor).Background(surfaceColor)
-	helpKeyStyle     = lipgloss.NewStyle().Bold(true).Foreground(cyanColor)
-	helpTextStyle    = lipgloss.NewStyle().Foreground(mutedColor)
-	validStyle       = lipgloss.NewStyle().Bold(true).Foreground(greenColor)
-	incompleteStyle  = lipgloss.NewStyle().Bold(true).Foreground(yellowColor)
-	invalidStyle     = lipgloss.NewStyle().Bold(true).Foreground(redColor)
-	modeStyle        = lipgloss.NewStyle().Bold(true).Foreground(accentColor).Background(surfaceColor).Padding(0, 1)
-	errorDetailStyle = lipgloss.NewStyle().Foreground(redColor)
+	logoStyle             = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	subtitleStyle         = lipgloss.NewStyle().Foreground(mutedColor)
+	sectionStyle          = lipgloss.NewStyle().Bold(true).Foreground(cyanColor)
+	panelStyle            = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(borderColor).Padding(0, 1)
+	activeLineStyle       = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	mutedStyle            = lipgloss.NewStyle().Foreground(mutedColor)
+	selectedStyle         = lipgloss.NewStyle().Bold(true).Foreground(accentColor).Background(surfaceColor)
+	numericSelectionStyle = lipgloss.NewStyle().Bold(true).Foreground(surfaceColor).Background(accentColor)
+	helpKeyStyle          = lipgloss.NewStyle().Bold(true).Foreground(cyanColor)
+	helpTextStyle         = lipgloss.NewStyle().Foreground(mutedColor)
+	validStyle            = lipgloss.NewStyle().Bold(true).Foreground(greenColor)
+	incompleteStyle       = lipgloss.NewStyle().Bold(true).Foreground(yellowColor)
+	invalidStyle          = lipgloss.NewStyle().Bold(true).Foreground(redColor)
+	modeStyle             = lipgloss.NewStyle().Bold(true).Foreground(accentColor).Background(surfaceColor).Padding(0, 1)
+	errorDetailStyle      = lipgloss.NewStyle().Foreground(redColor)
 )
+
+func adaptiveColor(light, dark string) compat.AdaptiveColor {
+	return compat.AdaptiveColor{Light: lipgloss.Color(light), Dark: lipgloss.Color(dark)}
+}
 
 // Run opens the Bubble Tea instrument editor. Ctrl-G exports and exits; q
 // exits without exporting. The returned command is written after Bubble Tea
@@ -96,7 +108,6 @@ func Run(ctx context.Context, config Config) (export string, exported bool, err 
 		tea.WithContext(ctx),
 		tea.WithInput(config.Input),
 		tea.WithOutput(config.Output),
-		tea.WithAltScreen(),
 		tea.WithoutSignalHandler(),
 	)
 	finalModel, runErr := program.Run()
@@ -121,9 +132,11 @@ func newEditor(ctx context.Context, config Config) *editor {
 	input.Prompt = ""
 	input.Placeholder = "type a source or option"
 	input.CharLimit = 0
-	input.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#111827", Dark: "#F4F4F5"})
-	input.PlaceholderStyle = mutedStyle.Italic(true)
-	input.Cursor.Style = lipgloss.NewStyle().Foreground(accentColor)
+	styles := input.Styles()
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(adaptiveColor("#111827", "#F4F4F5"))
+	styles.Focused.Placeholder = mutedStyle.Italic(true)
+	styles.Cursor.Color = accentColor
+	input.SetStyles(styles)
 
 	state := &editor{
 		config: config, lines: initialLines(config.Registry), input: input,
@@ -154,11 +167,17 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case runtimeTick:
 		state.pollRuntime()
 		return state, pollRuntimeCmd()
-	case tea.KeyMsg:
+	case tea.KeyboardEnhancementsMsg:
+		state.enhancedKeys = message.SupportsKeyDisambiguation()
+		return state, nil
+	case tea.KeyPressMsg:
 		return state.updateKey(message)
 	}
 	if state.editing {
 		before := state.input.Value()
+		if _, pasted := message.(tea.PasteMsg); pasted {
+			state.removeChosenNumber()
+		}
 		var command tea.Cmd
 		state.input, command = state.input.Update(message)
 		if state.input.Value() != before {
@@ -171,7 +190,8 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return state, nil
 }
 
-func (state *editor) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (state *editor) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key = printableKey(key)
 	state.message = ""
 	name := key.String()
 	if name == "ctrl+c" || !state.editing && (name == "q" || name == "esc") {
@@ -184,6 +204,18 @@ func (state *editor) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		state.exported = true
 		return state, tea.Quit
+	}
+	if name == "ctrl+m" || name == "alt+m" {
+		state.toggleMute()
+		return state, nil
+	}
+	if name == "ctrl+shift+d" || name == "alt+d" {
+		state.deleteActive()
+		return state, nil
+	}
+	if state.editing && name == "ctrl+d" {
+		state.finishEditing()
+		return state, nil
 	}
 	if name == "ctrl+n" {
 		return state, state.insert(state.active + 1)
@@ -223,25 +255,12 @@ func (state *editor) updateNormal(key string) tea.Cmd {
 		}
 	case "a", "o":
 		return state.insert(state.active + 1)
-	case "d":
-		if len(state.lines) == 1 {
-			state.lines[0] = ""
-		} else {
-			state.lines = append(state.lines[:state.active], state.lines[state.active+1:]...)
-			if state.active >= len(state.lines) {
-				state.active = len(state.lines) - 1
-			}
-		}
-		state.refresh(true)
 	}
 	return nil
 }
 
-func (state *editor) updateEdit(key tea.KeyMsg) tea.Cmd {
+func (state *editor) updateEdit(key tea.KeyPressMsg) tea.Cmd {
 	switch key.String() {
-	case "esc":
-		state.finishEditing()
-		return nil
 	case "up", "shift+tab":
 		state.selectSuggestion(-1)
 		return nil
@@ -255,6 +274,7 @@ func (state *editor) updateEdit(key tea.KeyMsg) tea.Cmd {
 		}
 		state.input.SetValue(state.suggestions[state.selected].Value)
 		state.input.CursorEnd()
+		state.focusNearestNumber()
 		state.lines[state.active] = state.input.Value()
 		state.selected = 0
 		state.refresh(true)
@@ -265,9 +285,38 @@ func (state *editor) updateEdit(key tea.KeyMsg) tea.Cmd {
 	case "alt+down":
 		state.nudge(-1)
 		return nil
+	case "left", "alt+left":
+		if len(numericTokens([]rune(state.input.Value()))) == 0 {
+			break
+		}
+		state.selectNumber(-1)
+		return nil
+	case "right", "alt+right":
+		if len(numericTokens([]rune(state.input.Value()))) == 0 {
+			break
+		}
+		state.selectNumber(1)
+		return nil
+	case "home", "end", "ctrl+a", "ctrl+e", "ctrl+b", "ctrl+f", "ctrl+left", "ctrl+right":
+		state.numberChosen = false
 	}
 
 	before := state.input.Value()
+	if state.numberChosen {
+		switch key.String() {
+		case "backspace", "delete":
+			state.removeChosenNumber()
+			state.lines[state.active] = state.input.Value()
+			state.refresh(true)
+			return nil
+		case "ctrl+v":
+			state.removeChosenNumber()
+		default:
+			if key.Text != "" {
+				state.removeChosenNumber()
+			}
+		}
+	}
 	updated, command := state.input.Update(key)
 	state.input = updated
 	if state.input.Value() != before {
@@ -280,16 +329,55 @@ func (state *editor) updateEdit(key tea.KeyMsg) tea.Cmd {
 
 func (state *editor) startEditing() tea.Cmd {
 	state.editing, state.selected = true, 0
+	state.numberChosen = false
 	state.input.SetValue(state.lines[state.active])
 	state.input.CursorEnd()
+	state.focusNearestNumber()
 	state.resizeInput()
 	state.refresh(false)
 	return state.input.Focus()
 }
 
+func (state *editor) deleteActive() {
+	if state.editing {
+		state.editing = false
+		state.input.Blur()
+	}
+	state.numberChosen = false
+	if len(state.lines) == 1 {
+		state.lines[0] = ""
+	} else {
+		state.lines = append(state.lines[:state.active], state.lines[state.active+1:]...)
+		if state.active >= len(state.lines) {
+			state.active = len(state.lines) - 1
+		}
+	}
+	state.refresh(true)
+}
+
+func (state *editor) toggleMute() {
+	state.muted = !state.muted
+	if state.muted {
+		state.live.close()
+		state.message = "instrument muted"
+		return
+	}
+	state.message = "instrument unmuted"
+	if state.lastValid == nil {
+		return
+	}
+	kind, err := state.live.apply(*state.lastValid)
+	if err != nil {
+		state.message = "audio: " + err.Error()
+		return
+	}
+	state.message = string(kind)
+}
+
 func (state *editor) finishEditing() {
 	state.lines[state.active] = state.input.Value()
 	state.editing = false
+	state.numberChosen = false
 	state.input.Blur()
 	state.refresh(true)
 }
@@ -323,17 +411,21 @@ func (state *editor) resizeInput() {
 	if width < 12 {
 		width = 12
 	}
-	state.input.Width = width
+	state.input.SetWidth(width)
 }
 
 func (state *editor) refresh(apply bool) {
 	state.analysis = Analyze(state.lines, state.config.Registry)
+	if state.analysis.State == Valid {
+		plan := state.analysis.Plan
+		state.lastValid = &plan
+	}
 	state.suggestions = Complete(state.config.Registry, state.lines, state.active)
 	if state.selected >= len(state.suggestions) {
 		state.selected = 0
 	}
 	state.pollRuntime()
-	if !apply || state.analysis.State != Valid {
+	if !apply || state.analysis.State != Valid || state.muted {
 		return
 	}
 	kind, err := state.live.apply(state.analysis.Plan)
@@ -356,7 +448,30 @@ func (state *editor) pollRuntime() bool {
 	return true
 }
 
-func (state *editor) View() string {
+func (state *editor) View() tea.View {
+	view := tea.NewView(state.render())
+	view.AltScreen = true
+	view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	view.KeyboardEnhancements.ReportAssociatedText = true
+	return view
+}
+
+func printableKey(key tea.KeyPressMsg) tea.KeyPressMsg {
+	modified := tea.ModCtrl | tea.ModAlt | tea.ModMeta | tea.ModHyper | tea.ModSuper
+	if key.Text != "" || key.Mod&modified != 0 {
+		return key
+	}
+	code := key.Code
+	if key.Mod.Contains(tea.ModShift) && key.ShiftedCode != 0 {
+		code = key.ShiftedCode
+	}
+	if code >= ' ' && code <= '~' {
+		key.Text = string(code)
+	}
+	return key
+}
+
+func (state *editor) render() string {
 	width := state.width
 	if width <= 0 {
 		width = 80
@@ -415,6 +530,9 @@ func (state *editor) documentPanel(width int) string {
 			marker = activeLineStyle.Render("◆ ")
 			if state.editing {
 				line = state.input.View()
+				if state.numberChosen {
+					line = state.numberSelectionView()
+				}
 			} else if line == "" {
 				line = mutedStyle.Italic(true).Render("empty clause")
 			} else {
@@ -531,7 +649,9 @@ func (state *editor) statusView() string {
 		status = invalidStyle.Render("● INVALID")
 	}
 	audioStatus := mutedStyle.Render("○ AUDIO IDLE")
-	if state.live.running() {
+	if state.muted {
+		audioStatus = incompleteStyle.Render("○ AUDIO MUTED")
+	} else if state.live.running() {
 		audioStatus = validStyle.Render("● AUDIO LIVE")
 	}
 	status += mutedStyle.Render("  ·  ") + audioStatus
@@ -542,20 +662,25 @@ func (state *editor) statusView() string {
 }
 
 func (state *editor) helpView(width int) string {
+	muteKey, deleteKey := "alt+m", "alt+d"
+	if state.enhancedKeys {
+		muteKey, deleteKey = "ctrl+m", "ctrl+shift+d"
+	}
 	pairs := [][2]string{
-		{"↑↓", "select"}, {"enter", "edit"}, {"a", "add"}, {"d", "delete"},
-		{"ctrl+↑↓", "move"}, {"ctrl+g", "export"}, {"q", "quit"},
+		{"↑↓", "select"}, {"enter", "edit"}, {"a", "add"}, {deleteKey, "delete"},
+		{"ctrl+↑↓", "move"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"},
 	}
 	if state.editing {
 		pairs = [][2]string{
 			{"type", "change"}, {"tab/↑↓", "choose"}, {"enter", "accept"},
-			{"alt+↑↓", "nudge"}, {"ctrl+n/p", "add"}, {"esc", "done"},
+			{"←→", "value"}, {"alt+↑↓", "nudge"}, {"ctrl+d", "done"},
+			{deleteKey, "delete"}, {muteKey, "mute"},
 		}
 	}
 	if width < 60 {
-		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {"ctrl+g", "export"}, {"q", "quit"}}
+		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"}}
 		if state.editing {
-			pairs = [][2]string{{"type", "change"}, {"tab", "choose"}, {"enter", "accept"}, {"esc", "done"}}
+			pairs = [][2]string{{"←→/alt+↑↓", "select/nudge"}, {"ctrl+d", "done"}, {deleteKey, "delete"}, {muteKey, "mute"}}
 		}
 	}
 	parts := make([]string, 0, len(pairs))
@@ -567,10 +692,18 @@ func (state *editor) helpView(width int) string {
 
 func (state *editor) nudge(direction float64) {
 	line := []rune(state.input.Value())
-	start, end := numericToken(line, state.input.Position())
+	start, end := 0, 0
+	if token, ok := state.currentChosenNumber(); ok {
+		start, end = token.start, token.end
+	} else {
+		start, end = numericToken(line, state.input.Position())
+	}
 	if start == end {
-		state.message = "place the cursor on a numeric value"
-		return
+		start, end = nearestNumericToken(line, state.input.Position())
+		if start == end {
+			state.message = "this clause has no numeric value"
+			return
+		}
 	}
 	value, err := unit.ParseNumber(string(line[start:end]))
 	if err != nil {
@@ -583,32 +716,199 @@ func (state *editor) nudge(direction float64) {
 	line = append(line[:start], append(replacement, line[end:]...)...)
 	state.input.SetValue(string(line))
 	state.input.SetCursor(start + len(replacement))
+	state.numberChosen = true
+	state.chosenNumber = numericRange{start: start, end: start + len(replacement)}
 	state.lines[state.active] = state.input.Value()
 	state.refresh(true)
 }
 
 func numericToken(line []rune, cursor int) (int, int) {
-	if cursor > len(line) {
-		cursor = len(line)
+	for _, token := range numericTokens(line) {
+		if cursor >= token.start && cursor <= token.end {
+			return token.start, token.end
+		}
 	}
-	inside := func(value rune) bool {
-		return value >= '0' && value <= '9' || value == '.' || value == '-' || value == '+' || value == 'k' || value == 'M' || value == 'G'
+	return 0, 0
+}
+
+type numericRange struct{ start, end int }
+
+func numericTokens(line []rune) []numericRange {
+	var result []numericRange
+	for index := 0; index < len(line); {
+		start := index
+		if start > 0 && identifierRune(line[start-1]) {
+			index++
+			continue
+		}
+		if line[index] == '-' {
+			index++
+			if index >= len(line) {
+				break
+			}
+		}
+		digits := index
+		for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+			index++
+		}
+		hasDigits := index > digits
+		if index < len(line) && line[index] == '.' && index+1 < len(line) && line[index+1] >= '0' && line[index+1] <= '9' && leadingDecimal(line, index) {
+			index++
+			fraction := index
+			for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+				index++
+			}
+			hasDigits = hasDigits || index > fraction
+		}
+		if !hasDigits {
+			index = start + 1
+			continue
+		}
+		if index < len(line) && (line[index] == 'k' || line[index] == 'M' || line[index] == 'G') {
+			index++
+		}
+		if (index < len(line) && identifierRune(line[index]) && !durationSuffix(line[index:])) ||
+			(index+1 < len(line) && line[index] == '.' && identifierRune(line[index+1])) {
+			index = start + 1
+			continue
+		}
+		result = append(result, numericRange{start: start, end: index})
 	}
-	start := cursor
-	if start == len(line) || start < len(line) && !inside(line[start]) {
-		start--
+	return result
+}
+
+func leadingDecimal(line []rune, dot int) bool {
+	count := 1
+	for index := dot - 1; index >= 0 && line[index] == '.'; index-- {
+		count++
 	}
-	if start < 0 || !inside(line[start]) {
+	return count%2 == 1
+}
+
+func identifierRune(value rune) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9' || value == '_'
+}
+
+func durationSuffix(suffix []rune) bool {
+	return suffixBoundary(suffix, "s") || suffixBoundary(suffix, "ms")
+}
+
+func suffixBoundary(suffix []rune, want string) bool {
+	value := []rune(want)
+	if len(suffix) < len(value) || string(suffix[:len(value)]) != want {
+		return false
+	}
+	return len(suffix) == len(value) || !identifierRune(suffix[len(value)])
+}
+
+func nearestNumericToken(line []rune, cursor int) (int, int) {
+	tokens := numericTokens(line)
+	if len(tokens) == 0 {
 		return 0, 0
 	}
-	end := start + 1
-	for start > 0 && inside(line[start-1]) {
-		start--
+	best, distance := tokens[0], len(line)+1
+	for _, token := range tokens {
+		current := 0
+		if cursor < token.start {
+			current = token.start - cursor
+		} else if cursor > token.end {
+			current = cursor - token.end
+		}
+		if current < distance {
+			best, distance = token, current
+		}
 	}
-	for end < len(line) && inside(line[end]) {
-		end++
+	return best.start, best.end
+}
+
+func (state *editor) focusNearestNumber() bool {
+	start, end := nearestNumericToken([]rune(state.input.Value()), state.input.Position())
+	if start == end {
+		state.numberChosen = false
+		return false
 	}
-	return start, end
+	state.input.SetCursor(end)
+	state.numberChosen = true
+	state.chosenNumber = numericRange{start: start, end: end}
+	return true
+}
+
+func (state *editor) selectNumber(direction int) {
+	tokens := numericTokens([]rune(state.input.Value()))
+	if len(tokens) == 0 {
+		state.numberChosen = false
+		state.message = "this clause has no numeric value"
+		return
+	}
+	cursor, selected := state.input.Position(), -1
+	for index, token := range tokens {
+		if cursor >= token.start && cursor <= token.end {
+			selected = index
+			break
+		}
+	}
+	if selected < 0 {
+		if direction < 0 {
+			selected = len(tokens)
+		} else {
+			selected = -1
+		}
+	}
+	selected = (selected + direction + len(tokens)) % len(tokens)
+	state.input.SetCursor(tokens[selected].end)
+	state.numberChosen = true
+	state.chosenNumber = tokens[selected]
+}
+
+func (state *editor) currentChosenNumber() (numericRange, bool) {
+	if !state.numberChosen {
+		return numericRange{}, false
+	}
+	for _, token := range numericTokens([]rune(state.input.Value())) {
+		if token == state.chosenNumber {
+			return token, true
+		}
+	}
+	state.numberChosen = false
+	return numericRange{}, false
+}
+
+func (state *editor) removeChosenNumber() bool {
+	token, ok := state.currentChosenNumber()
+	if !ok {
+		return false
+	}
+	line := []rune(state.input.Value())
+	line = append(line[:token.start], line[token.end:]...)
+	state.input.SetValue(string(line))
+	state.input.SetCursor(token.start)
+	state.numberChosen = false
+	return true
+}
+
+func (state *editor) numberSelectionView() string {
+	token, ok := state.currentChosenNumber()
+	if !ok {
+		return state.input.View()
+	}
+	line := []rune(state.input.Value())
+	first, last := 0, len(line)
+	if width := state.input.Width(); width > 0 && last > width {
+		last = token.end
+		first = last - width
+		if first > token.start {
+			first = token.start
+		}
+		if first < 0 {
+			first = 0
+			last = min(len(line), width)
+		}
+	}
+	style := state.input.Styles().Focused.Text.Inline(true)
+	return style.Render(string(line[first:token.start])) +
+		numericSelectionStyle.Render(string(line[token.start:token.end])) +
+		style.Render(string(line[token.end:last]))
 }
 
 type diagnosticCapture struct {

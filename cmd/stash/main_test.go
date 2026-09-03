@@ -96,8 +96,8 @@ func TestRunWithoutArgumentsOpensInteractiveEditor(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr = %q", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "STASH — live instrument") {
-		t.Fatalf("stdout does not contain TUI heading: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "\x1b[?1049l") {
+		t.Fatalf("stdout does not restore the primary screen: %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())

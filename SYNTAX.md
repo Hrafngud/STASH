@@ -1448,13 +1448,17 @@ Normal-mode keys:
 Up / Down       select clause
 Enter           edit clause
 a               add clause below
-d               delete clause
+Ctrl+Shift+D    delete clause
 Ctrl+Up/Down    reorder clause
 Ctrl+N          add clause below
 Ctrl+P          add clause above
+Ctrl+M          mute or unmute the instrument
 Ctrl+G          export valid instrument and exit
 q / Ctrl+C      quit
 ```
+
+Terminals that cannot distinguish modified control characters use `Alt+D` for
+delete and `Alt+M` for mute/unmute; the editor help bar shows the active keys.
 
 Edit-mode keys:
 
@@ -1462,15 +1466,20 @@ Edit-mode keys:
 Tab             cycle semantic suggestions
 Up / Down       select suggestion
 Enter           accept suggestion, or finish when none is shown
-Escape          finish editing
-Left / Right    move text cursor
-Alt+Up/Down     nudge the numeric value under the cursor
+Ctrl+D          finish editing
+Left / Right    select numeric values, or move the cursor when none exist
+Alt+Up/Down     nudge the selected numeric value
+Ctrl+Shift+D    delete the current clause
+Ctrl+M          mute or unmute the instrument
 Ctrl+N/P        add a clause below/above
 ```
 
 Completion is derived from registered sources and structured synth/effect
 metadata. Declared synth IDs, synth outputs, rhythm controls, effects, and only
-their valid parameter targets enter the relevant completion contexts.
+their valid parameter targets enter the relevant completion contexts. Numeric
+options and parameters with documented defaults insert those defaults when
+their completion is accepted. The complete numeric token remains selected so
+the next typed or pasted value replaces the default instead of appending to it.
 
 Export uses the ordinary shell-safe form:
 

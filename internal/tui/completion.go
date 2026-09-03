@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zalmo/stash/internal/cli"
+	"github.com/zalmo/stash/internal/primitive"
 	"github.com/zalmo/stash/internal/sound"
 	"github.com/zalmo/stash/internal/source"
 )
@@ -23,16 +25,21 @@ var optionHelp = []Suggestion{
 	{"-m", "-m ", "map a control to a sound parameter"},
 	{"--range", "--range ", "override a control's input range"},
 	{"-w", "-w ", "select an oscillator waveform"},
-	{"-v", "-v ", "set output or synth-master gain"},
+	{"-v", "-v " + numberText(cli.DefaultGain), "set output or synth-master gain"},
 	{"-t", "-t ", "define a telemetry trigger"},
 	{"-n", "-n ", "define notes, a scale, or a mode"},
 	{"-r", "-r ", "define a rhythm"},
 	{"-b", "-b ", "set tempo in BPM"},
-	{"-d", "-d ", "set event gate duration"},
-	{"-a", "-a ", "set attack,decay,sustain,release"},
-	{"--swing", "--swing ", "set swing percentage (50..75)"},
+	{"-d", "-d " + cli.DefaultGateDuration.String(), "set event gate duration"},
+	{"-a", "-a " + defaultADSRValue(), "set attack,decay,sustain,release"},
+	{"--swing", "--swing " + numberText(primitive.DefaultSwing), "set swing percentage (50..75)"},
 	{"-f", "-f ", "append a filter"},
 	{"-x", "-x ", "append an effect"},
+}
+
+func defaultADSRValue() string {
+	value := cli.DefaultADSR
+	return strings.Join([]string{value.Attack.String(), value.Decay.String(), numberText(value.Sustain), value.Release.String()}, ",")
 }
 
 // Complete resolves suggestions from the clause context and declarations in
@@ -46,14 +53,14 @@ func Complete(registry *source.Registry, lines []string, active int) []Suggestio
 		if active == 0 || !hasSourceClause(lines) {
 			return sourceSuggestions(registry, "", "")
 		}
-		return append([]Suggestion(nil), optionHelp...)
+		return optionSuggestions(lines)
 	}
 	if !strings.HasPrefix(line, "-") {
 		return sourceSuggestions(registry, line, "")
 	}
 	option, value, hasValue := strings.Cut(line, " ")
 	if !hasValue {
-		return filterSuggestions(optionHelp, option)
+		return filterSuggestions(optionSuggestions(lines), option)
 	}
 	switch option {
 	case "-s":
@@ -78,6 +85,20 @@ func Complete(registry *source.Registry, lines []string, active int) []Suggestio
 		return effectSuggestions("-x ", value, "effect")
 	}
 	return nil
+}
+
+func optionSuggestions(lines []string) []Suggestion {
+	result := append([]Suggestion(nil), optionHelp...)
+	if !hasOption(lines, "-s") {
+		return result
+	}
+	for index := range result {
+		if result[index].Label == "-v" {
+			result[index].Value = "-v 1"
+			break
+		}
+	}
+	return result
 }
 
 func hasSourceClause(lines []string) bool {
@@ -165,7 +186,7 @@ func synthSuggestions(value string) []Suggestion {
 	for _, parameterName := range sound.SortedParameterNames(spec) {
 		if strings.HasPrefix(parameterName, name) {
 			parameter := spec.Parameters[parameterName]
-			result = append(result, Suggestion{Label: parameterName + "=", Value: base + parameterName + "=", Help: parameterHelp(parameter.Description, parameter.Unit, parameter.Minimum, parameter.Maximum, parameter.Default, parameter.AudioRate)})
+			result = append(result, Suggestion{Label: parameterName + "=", Value: base + parameterName + "=" + numberText(parameter.Default), Help: parameterHelp(parameter.Description, parameter.Unit, parameter.Minimum, parameter.Maximum, parameter.Default, parameter.AudioRate)})
 		}
 	}
 	configNames := make([]string, 0, len(spec.Config))
@@ -176,7 +197,11 @@ func synthSuggestions(value string) []Suggestion {
 	for _, configName := range configNames {
 		if strings.HasPrefix(configName, name) {
 			config := spec.Config[configName]
-			result = append(result, Suggestion{Label: configName + "=", Value: base + configName + "=", Help: config.Description + "\ngraph-time setting"})
+			value := base + configName + "="
+			if _, err := strconv.ParseFloat(config.Default, 64); err == nil {
+				value += config.Default
+			}
+			result = append(result, Suggestion{Label: configName + "=", Value: value, Help: config.Description + "\ngraph-time setting"})
 		}
 	}
 	return result
@@ -220,7 +245,7 @@ func effectSuggestions(clausePrefix, value, targetKind string) []Suggestion {
 		var result []Suggestion
 		for _, spec := range specs {
 			if strings.HasPrefix(spec.Name, name) {
-				result = append(result, Suggestion{Label: spec.Name, Value: clausePrefix + spec.Name + ":", Help: effectSpecHelp(spec)})
+				result = append(result, Suggestion{Label: spec.Name, Value: effectDefaultValue(clausePrefix, spec), Help: effectSpecHelp(spec)})
 			}
 		}
 		return result
@@ -248,10 +273,25 @@ func effectSuggestions(clausePrefix, value, targetKind string) []Suggestion {
 	var result []Suggestion
 	for _, parameter := range spec.Parameters {
 		if strings.HasPrefix(parameter.Name, current) {
-			result = append(result, Suggestion{Label: parameter.Name + "=", Value: base + parameter.Name + "=", Help: effectParameterHelp(spec, parameter)})
+			result = append(result, Suggestion{Label: parameter.Name + "=", Value: base + parameter.Name + "=" + numberText(parameter.Default), Help: effectParameterHelp(spec, parameter)})
 		}
 	}
 	return result
+}
+
+func effectDefaultValue(clausePrefix string, spec sound.EffectSpec) string {
+	if spec.Kind == sound.EffectConvolution {
+		return clausePrefix + spec.Name + ":"
+	}
+	arguments := make([]string, len(spec.Parameters))
+	for index, parameter := range spec.Parameters {
+		arguments[index] = parameter.Name + "=" + numberText(parameter.Default)
+	}
+	return clausePrefix + spec.Name + ":" + strings.Join(arguments, ",")
+}
+
+func numberText(value float64) string {
+	return strconv.FormatFloat(value, 'g', -1, 64)
 }
 
 func effectSpecHelp(spec sound.EffectSpec) string {

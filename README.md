@@ -11,7 +11,7 @@ Telemetry sources control composable synth graphs and ordered effects through a 
 ## Requirements
 
 - Linux with readable `/proc` and `/sys` telemetry interfaces
-- Go 1.23 or newer to build
+- Go 1.25 or newer to build
 - Csound 6 or newer for device audio and raw PCM output
 
 Telemetry and discovery commands do not require Csound. Hardware-specific sources are reported as unavailable when STASH cannot detect a reliable local interface.
@@ -43,8 +43,13 @@ The Bubble Tea editor starts with a playable instrument, keeps each existing
 CLI clause on its own line, and offers context-sensitive source, synth, effect,
 control, and target completion. Numeric synth/effect edits are applied to the
 running audio session; structural edits rebuild the graph inside the same
-process. Press `Ctrl+G` to export the current editor contents as an ordinary
-multiline `stash` command.
+process. Numeric completions insert their documented defaults; in edit mode,
+the entire active value is highlighted, typing or pasting replaces it,
+`Left/Right` selects another value, and `Alt+Up/Down` nudges it. Press `Ctrl+D` to
+finish a line, `Ctrl+Shift+D` to delete it, `Ctrl+M` to mute/unmute, or `Ctrl+G`
+to export the editor contents as an ordinary multiline `stash` command. On
+terminals without key disambiguation, the help bar shows the distinct fallbacks
+`Alt+D` for delete and `Alt+M` for mute/unmute.
 
 Read aggregate CPU usage as machine-oriented numeric lines:
 

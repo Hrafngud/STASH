@@ -44,9 +44,34 @@ func TestSynthCompletionChangesContext(t *testing.T) {
 		t.Fatalf("FM parameters = %v", labels(parameters))
 	}
 	for _, item := range parameters {
-		if item.Label == "index=" && !strings.Contains(item.Help, "audio-rate: true") {
-			t.Fatalf("index help = %q", item.Help)
+		if item.Label == "index=" {
+			if !strings.HasSuffix(item.Value, "index=1") {
+				t.Fatalf("index completion = %q", item.Value)
+			}
+			if !strings.Contains(item.Help, "audio-rate: true") {
+				t.Fatalf("index help = %q", item.Help)
+			}
 		}
+	}
+}
+
+func TestNumericCompletionsInsertDocumentedDefaults(t *testing.T) {
+	options := Complete(testRegistry(t), []string{"cpu.usage", ""}, 1)
+	values := map[string]string{}
+	for _, item := range options {
+		values[item.Label] = item.Value
+	}
+	for label, want := range map[string]string{
+		"-v": "-v 0.1", "-d": "-d 100ms", "-a": "-a 5ms,20ms,0.8,50ms", "--swing": "--swing 50",
+	} {
+		if got := values[label]; got != want {
+			t.Errorf("%s completion = %q, want %q", label, got, want)
+		}
+	}
+
+	withSynth := Complete(testRegistry(t), []string{"cpu.usage", "-s fm:bass", "-v"}, 2)
+	if len(withSynth) != 1 || withSynth[0].Value != "-v 1" {
+		t.Fatalf("synth master completion = %#v", withSynth)
 	}
 }
 
@@ -69,5 +94,10 @@ func TestEffectCompletionComesFromEffectRegistry(t *testing.T) {
 	items := Complete(testRegistry(t), []string{"cpu.usage", "-x rev"}, 1)
 	if !contains(labels(items), "reverb") {
 		t.Fatalf("effect labels = %v", labels(items))
+	}
+	for _, item := range items {
+		if item.Label == "reverb" && item.Value != "-x reverb:size=0.7,damp=0.4,mix=0.25" {
+			t.Fatalf("reverb completion = %q", item.Value)
+		}
 	}
 }

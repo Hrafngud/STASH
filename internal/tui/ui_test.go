@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func newTestEditor(t *testing.T) *editor {
@@ -23,24 +23,28 @@ func newTestEditor(t *testing.T) *editor {
 func TestEditorUsesBubbleTeaResizeAndEditMessages(t *testing.T) {
 	state := newTestEditor(t)
 	_, _ = state.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
-	if state.width != 120 || state.height != 32 || state.input.Width <= 12 {
-		t.Fatalf("resized editor = %dx%d, input width %d", state.width, state.height, state.input.Width)
+	if state.width != 120 || state.height != 32 || state.input.Width() <= 12 {
+		t.Fatalf("resized editor = %dx%d, input width %d", state.width, state.height, state.input.Width())
 	}
 
-	_, _ = state.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !state.editing || !state.input.Focused() {
 		t.Fatal("Enter did not focus the clause input")
 	}
-	_, _ = state.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	if got, want := state.lines[0], "cpu.usagex"; got != want {
 		t.Fatalf("edited clause = %q, want %q", got, want)
 	}
-	_, _ = state.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !state.editing || !state.input.Focused() {
+		t.Fatal("Escape unexpectedly left edit mode")
+	}
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if state.editing || state.input.Focused() {
-		t.Fatal("Escape did not return to navigation mode")
+		t.Fatal("Ctrl+D did not return to navigation mode")
 	}
 
-	view := state.View()
+	view := state.View().Content
 	for _, want := range []string{"STASH — live instrument", "INSTRUMENT", "COMPLETIONS", "INVALID", "AUDIO IDLE"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view does not contain %q", want)
@@ -58,6 +62,140 @@ func TestEditorNudgesNumberAtUnicodeAwareCursor(t *testing.T) {
 	}
 }
 
+func TestEditorFindsAndCyclesNumericValuesForNudging(t *testing.T) {
+	state := newTestEditor(t)
+	state.lines[1] = "-s fm:bass,ratio=2,index=4"
+	state.active = 1
+	state.startEditing()
+	state.input.CursorStart()
+	state.numberChosen = false
+	state.nudge(1)
+	if got := state.lines[1]; !strings.Contains(got, "ratio=2.02") {
+		t.Fatalf("automatically focused clause = %q", got)
+	}
+
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	state.nudge(1)
+	if got := state.lines[1]; !strings.Contains(got, "index=4.04") {
+		t.Fatalf("cycled numeric clause = %q", got)
+	}
+}
+
+func TestNumericTokensHandleRangesDurationsAndIdentifiers(t *testing.T) {
+	tests := []struct {
+		line string
+		want []string
+	}{
+		{"-m freq=45..90", []string{"45", "90"}},
+		{"-m syn.fm1.out:syn.add1.freq.mod=-.4...4", []string{"-.4", ".4"}},
+		{"-a 5ms,20ms,0.8,50ms", []string{"5", "20", "0.8", "50"}},
+		{"-m syn.add.partial.1.gain=0.5", []string{"0.5"}},
+	}
+	for _, test := range tests {
+		line := []rune(test.line)
+		tokens := numericTokens(line)
+		got := make([]string, len(tokens))
+		for index, token := range tokens {
+			got[index] = string(line[token.start:token.end])
+		}
+		if strings.Join(got, ",") != strings.Join(test.want, ",") {
+			t.Errorf("numericTokens(%q) = %v, want %v", test.line, got, test.want)
+		}
+	}
+}
+
+func TestEditorControlShortcutsDeleteAndMute(t *testing.T) {
+	state := newTestEditor(t)
+	state.active = 1
+	state.startEditing()
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'm', Mod: tea.ModCtrl})
+	if !state.muted {
+		t.Fatal("Ctrl+M did not mute the instrument")
+	}
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'm', Mod: tea.ModCtrl})
+	if state.muted {
+		t.Fatal("Ctrl+M did not unmute the instrument")
+	}
+
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl | tea.ModShift})
+	if state.editing || len(state.lines) != 1 {
+		t.Fatalf("Ctrl+Shift+D left editing=%t, lines=%v", state.editing, state.lines)
+	}
+}
+
+func TestEditorLegacyTerminalFallbackShortcuts(t *testing.T) {
+	state := newTestEditor(t)
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt})
+	if !state.muted {
+		t.Fatal("Alt+M did not mute without enhanced keyboard support")
+	}
+
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModAlt})
+	if len(state.lines) != 1 {
+		t.Fatalf("Alt+D left lines=%v", state.lines)
+	}
+	if !strings.Contains(state.helpView(80), "alt+m") {
+		t.Fatal("fallback shortcut is missing from help")
+	}
+
+	_, _ = state.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
+	if !state.enhancedKeys || !strings.Contains(state.helpView(80), "ctrl+m") {
+		t.Fatal("enhanced shortcut is missing from help")
+	}
+	view := state.View()
+	if !view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes || !view.KeyboardEnhancements.ReportAssociatedText {
+		t.Fatal("view does not request enhanced keys with their associated text")
+	}
+}
+
+func TestTypingReplacesSelectedNumericDefault(t *testing.T) {
+	state := newTestEditor(t)
+	state.lines[1] = "-s fm:bass,i"
+	state.active = 1
+	state.startEditing()
+
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	token, ok := state.currentChosenNumber()
+	if !ok || string([]rune(state.input.Value())[token.start:token.end]) != "1" {
+		t.Fatalf("accepted completion did not select its default: %q, %#v", state.input.Value(), token)
+	}
+	_, _ = state.Update(tea.KeyPressMsg{Code: '4'})
+	if got, want := state.lines[1], "-s fm:bass,index=4"; got != want {
+		t.Fatalf("typed replacement = %q, want %q", got, want)
+	}
+	if state.analysis.State != Valid {
+		t.Fatalf("typed replacement is invalid: %v", state.analysis.Err)
+	}
+}
+
+func TestPasteReplacesWholeSelectedNumber(t *testing.T) {
+	state := newTestEditor(t)
+	state.active = 1
+	state.startEditing()
+	_, _ = state.Update(tea.PasteMsg{Content: "12"})
+	if got := state.lines[1]; !strings.Contains(got, "index=12") || strings.Contains(got, "index=412") {
+		t.Fatalf("pasted numeric replacement = %q", got)
+	}
+}
+
+func TestNumericSelectionViewHighlightsWholeValue(t *testing.T) {
+	state := newTestEditor(t)
+	state.lines[1] = "-s fm:bass,index=400"
+	state.active = 1
+	state.startEditing()
+
+	token, ok := state.currentChosenNumber()
+	if !ok {
+		t.Fatal("numeric value was not selected")
+	}
+	if got := string([]rune(state.input.Value())[token.start:token.end]); got != "400" {
+		t.Fatalf("selected numeric value = %q, want %q", got, "400")
+	}
+	if got, want := state.numberSelectionView(), numericSelectionStyle.Render("400"); !strings.Contains(got, want) {
+		t.Fatalf("selection view does not highlight the whole numeric value: %q", got)
+	}
+}
+
 func TestRunExportsAfterBubbleTeaRestoresScreen(t *testing.T) {
 	var output bytes.Buffer
 	command, exported, err := Run(context.Background(), Config{
@@ -70,8 +208,8 @@ func TestRunExportsAfterBubbleTeaRestoresScreen(t *testing.T) {
 	if !exported || !strings.HasPrefix(command, "stash cpu.usage") {
 		t.Fatalf("export = %q, %t", command, exported)
 	}
-	if !strings.Contains(output.String(), "STASH — live instrument") {
-		t.Fatal("Bubble Tea did not render the editor")
+	if !strings.Contains(output.String(), "\x1b[?1049l") {
+		t.Fatalf("Bubble Tea did not restore the primary screen: %q", output.String())
 	}
 }
 

@@ -41,13 +41,20 @@ the last valid instrument playing through intermediate edits.
 In normal mode, Up and Down select a clause, Enter edits,
 .B a
 adds below,
-.B d
-deletes, Ctrl-Up and Ctrl-Down reorder, and Ctrl-G exports the instrument as an
-ordinary multiline shell command.  Ctrl-N and Ctrl-P add below or above.
+Ctrl-Shift-D deletes, Ctrl-Up and Ctrl-Down reorder, Ctrl-M mutes or unmutes,
+and Ctrl-G exports the instrument as an ordinary multiline shell command.
+Ctrl-N and Ctrl-P add below or above.
+.PP
+When the terminal cannot distinguish modified control characters, the editor
+uses Alt-D for delete and Alt-M for mute or unmute.  The help bar shows the
+active bindings.
 .PP
 In edit mode, Tab cycles semantic completions, Up and Down select one, Enter
-accepts it, Escape finishes editing, arrows move the cursor, and Alt-Up or
-Alt-Down nudges the numeric value under the cursor.  Press
+accepts it, and Ctrl-D finishes editing.  Left and Right select numeric values,
+or move the cursor when the clause has none; Alt-Up and Alt-Down nudge the
+selected value.  Ctrl-Shift-D deletes the clause and Ctrl-M mutes or unmutes.
+Numeric completions insert documented defaults automatically and select the
+complete number, so typing or pasting replaces that default.  Press
 .B q
 in normal mode or Ctrl-C to quit.
 .PP
