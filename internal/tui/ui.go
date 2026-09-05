@@ -60,30 +60,28 @@ type runtimeTick time.Time
 const runtimePollInterval = 100 * time.Millisecond
 
 var (
-	accentColor  = adaptiveColor("#5B21B6", "#C4A7E7")
-	cyanColor    = adaptiveColor("#0369A1", "#7DD3FC")
-	greenColor   = adaptiveColor("#15803D", "#86EFAC")
-	yellowColor  = adaptiveColor("#A16207", "#FDE68A")
-	redColor     = adaptiveColor("#B91C1C", "#FCA5A5")
-	mutedColor   = adaptiveColor("#6B7280", "#8B93A7")
-	borderColor  = adaptiveColor("#D1D5DB", "#414559")
-	surfaceColor = adaptiveColor("#F3F4F6", "#24273A")
+	textColor    = adaptiveColor("#202124", "#ECECF1")
+	mutedColor   = adaptiveColor("#5F6368", "#A7A9B4")
+	borderColor  = adaptiveColor("#B8BABF", "#555863")
+	surfaceColor = adaptiveColor("#E8E9EC", "#30323A")
+	inverseColor = adaptiveColor("#F7F7F5", "#17181C")
 
-	logoStyle             = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	logoStyle             = lipgloss.NewStyle().Bold(true).Foreground(textColor)
 	subtitleStyle         = lipgloss.NewStyle().Foreground(mutedColor)
-	sectionStyle          = lipgloss.NewStyle().Bold(true).Foreground(cyanColor)
+	sectionStyle          = lipgloss.NewStyle().Bold(true).Foreground(textColor)
 	panelStyle            = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(borderColor).Padding(0, 1)
-	activeLineStyle       = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	activeLineStyle       = lipgloss.NewStyle().Bold(true).Foreground(textColor)
 	mutedStyle            = lipgloss.NewStyle().Foreground(mutedColor)
-	selectedStyle         = lipgloss.NewStyle().Bold(true).Foreground(accentColor).Background(surfaceColor)
-	numericSelectionStyle = lipgloss.NewStyle().Bold(true).Foreground(surfaceColor).Background(accentColor)
-	helpKeyStyle          = lipgloss.NewStyle().Bold(true).Foreground(cyanColor)
+	selectedStyle         = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(textColor)
+	numericSelectionStyle = lipgloss.NewStyle().Bold(true).Foreground(inverseColor).Background(textColor)
+	helpKeyStyle          = lipgloss.NewStyle().Bold(true).Foreground(textColor)
 	helpTextStyle         = lipgloss.NewStyle().Foreground(mutedColor)
-	validStyle            = lipgloss.NewStyle().Bold(true).Foreground(greenColor)
-	incompleteStyle       = lipgloss.NewStyle().Bold(true).Foreground(yellowColor)
-	invalidStyle          = lipgloss.NewStyle().Bold(true).Foreground(redColor)
-	modeStyle             = lipgloss.NewStyle().Bold(true).Foreground(accentColor).Background(surfaceColor).Padding(0, 1)
-	errorDetailStyle      = lipgloss.NewStyle().Foreground(redColor)
+	validStyle            = lipgloss.NewStyle().Bold(true).Foreground(textColor)
+	incompleteStyle       = lipgloss.NewStyle().Foreground(textColor)
+	invalidStyle          = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(textColor)
+	modeStyle             = lipgloss.NewStyle().Bold(true).Foreground(textColor).Background(surfaceColor).Padding(0, 1)
+	errorDetailStyle      = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(textColor)
+	labelStyle            = lipgloss.NewStyle().Bold(true).Foreground(textColor)
 )
 
 func adaptiveColor(light, dark string) compat.AdaptiveColor {
@@ -133,9 +131,9 @@ func newEditor(ctx context.Context, config Config) *editor {
 	input.Placeholder = "type a source or option"
 	input.CharLimit = 0
 	styles := input.Styles()
-	styles.Focused.Text = lipgloss.NewStyle().Foreground(adaptiveColor("#111827", "#F4F4F5"))
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(textColor)
 	styles.Focused.Placeholder = mutedStyle.Italic(true)
-	styles.Cursor.Color = accentColor
+	styles.Cursor.Color = textColor
 	input.SetStyles(styles)
 
 	state := &editor{
@@ -536,17 +534,19 @@ func (state *editor) documentPanel(width int) string {
 			} else if line == "" {
 				line = mutedStyle.Italic(true).Render("empty clause")
 			} else {
-				line = activeLineStyle.Render(line)
+				line = activeLineStyle.Render(highlightClause(line, index, state.lines, state.config.Registry))
 			}
 		} else if line == "" {
 			line = mutedStyle.Italic(true).Render("empty clause")
+		} else {
+			line = highlightClause(line, index, state.lines, state.config.Registry)
 		}
 		rows = append(rows, lipgloss.NewStyle().MaxWidth(innerWidth).Render(marker+lineNumber+"  "+line))
 	}
 	if end < len(state.lines) {
 		rows = append(rows, mutedStyle.Render(fmt.Sprintf("  ↓ %d later clause(s)", len(state.lines)-end)))
 	}
-	title := sectionStyle.Render("INSTRUMENT") + mutedStyle.Render(fmt.Sprintf("  %d clauses", len(state.lines)))
+	title := sectionStyle.Render("INSTRUMENT") + mutedStyle.Render(fmt.Sprintf("  %d clauses  ·  color = identity", len(state.lines)))
 	body := title + "\n\n" + strings.Join(rows, "\n")
 	return panelStyle.Width(innerWidth).Render(body)
 }
@@ -583,11 +583,13 @@ func (state *editor) inspectorPanel(width int) string {
 	if innerWidth < 24 {
 		innerWidth = 24
 	}
-	title := sectionStyle.Render("COMPLETIONS")
+	title := sectionStyle.Render("INSPECTOR")
 	var body strings.Builder
 	body.WriteString(title)
 	body.WriteString("\n\n")
 	if state.editing && len(state.suggestions) > 0 {
+		body.WriteString(labelStyle.Render("COMPLETIONS"))
+		body.WriteByte('\n')
 		limit, helpLines := 6, 4
 		if state.width < 96 {
 			limit, helpLines = 2, 1
@@ -600,7 +602,8 @@ func (state *editor) inspectorPanel(width int) string {
 				prefix = "› "
 				style = selectedStyle
 			}
-			body.WriteString(style.MaxWidth(innerWidth).Render(prefix + state.suggestions[index].Label))
+			label := highlightReference(state.suggestions[index].Label, state.lines, state.config.Registry)
+			body.WriteString(style.MaxWidth(innerWidth).Render(prefix + label))
 			body.WriteByte('\n')
 		}
 		if end < len(state.suggestions) {
@@ -612,7 +615,7 @@ func (state *editor) inspectorPanel(width int) string {
 	} else if state.analysis.Err != nil {
 		body.WriteString(errorDetailStyle.Width(innerWidth).Render(state.analysis.Err.Error()))
 	} else {
-		body.WriteString(mutedStyle.Italic(true).Render("Enter edit mode to see contextual choices."))
+		body.WriteString(state.clauseInsight(innerWidth))
 	}
 	return panelStyle.Width(innerWidth).Render(strings.TrimRight(body.String(), "\n"))
 }
@@ -642,11 +645,11 @@ func suggestionWindow(selected, count, limit int) (int, int) {
 }
 
 func (state *editor) statusView() string {
-	status := incompleteStyle.Render("● INCOMPLETE")
+	status := incompleteStyle.Render("… INCOMPLETE")
 	if state.analysis.State == Valid {
-		status = validStyle.Render("● VALID")
+		status = validStyle.Render("✓ VALID")
 	} else if state.analysis.State == Invalid {
-		status = invalidStyle.Render("● INVALID")
+		status = invalidStyle.Render("✕ INVALID")
 	}
 	audioStatus := mutedStyle.Render("○ AUDIO IDLE")
 	if state.muted {

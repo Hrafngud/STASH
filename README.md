@@ -51,6 +51,12 @@ to export the editor contents as an ordinary multiline `stash` command. On
 terminals without key disambiguation, the help bar shows the distinct fallbacks
 `Alt+D` for delete and `Alt+M` for mute/unmute.
 
+The editor keeps its chrome neutral and reserves color for patch identity. The
+same telemetry source or synth ID has the same color wherever it appears, while
+the inspector labels the selected `-m` clause as a control-rate map or an
+audio-rate route. Names, arrows, and role labels preserve the same meaning in a
+monochrome terminal.
+
 Read aggregate CPU usage as machine-oriented numeric lines:
 
 ```bash
@@ -105,6 +111,22 @@ stash cpu.usage -w saw \
   -m phaser.rate=.05..4 \
   -m reverb.size=.2..0.95
 ```
+
+Use more than one telemetry source by keeping one primary source bare and
+naming every additional source before the colon in a repeated `-m` clause:
+
+```bash
+stash cpu.usage \
+  -s fm:motion,ratio=2,index=3 \
+  -m syn.motion.freq=80..800/log~100ms \
+  -m cpu.temp:syn.motion.index=.5..8 \
+  -m gpu.usage:syn.motion.gain=.02...2
+```
+
+The bare `-m TARGET=MAP` form is shorthand for the primary `cpu.usage` source.
+Telemetry is control-rate data: it maps into synth/effect parameters but does
+not become an audio-rate oscillator signal. Use `syn.ID.out` on the left of the
+colon when one synth must modulate an audio-rate-capable parameter of another.
 
 Build an audio-rate modular patch while keeping the modulator silent in the
 master mix:

@@ -1442,6 +1442,21 @@ session without resetting oscillator phase. Source, control/routing, synth or
 effect topology, synth type, and fixed-configuration changes rebuild the graph
 inside the same STASH process.
 
+The first bare source clause is the primary telemetry control. A second bare
+source clause is not valid syntax; additional telemetry sources are selected in
+repeated mappings such as `-m gpu.usage:syn.voice.gain=.02...2`. Omitting the
+control and colon, as in `-m syn.voice.freq=80..800`, uses the primary source.
+Telemetry sources are control-rate values and may map into any numeric synth or
+effect parameter. They are not audio-rate synth signals. Only `syn.ID.out` may
+appear as an audio-rate control, and it may target only parameters reported as
+audio-rate capable.
+
+The editor chrome is neutral. Stable semantic colors identify telemetry sources
+and synth IDs across their declaration and route occurrences. The inspector
+also renders every selected mapping as a labeled source-to-target relationship
+and distinguishes control-rate maps from audio-rate routes, so color is not the
+only carrier of meaning.
+
 Normal-mode keys:
 
 ```text

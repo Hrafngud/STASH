@@ -866,7 +866,41 @@ Every numeric argument exposed by an effect automatically follows the same
 `effect.parameter` convention. Unindexed targets bind to the most recently
 declared matching effect.
 
-## 57. Capability coverage index
+## 57. Multiple telemetry sources and synth signal roles
+
+One source is the primary telemetry control. Bare mappings use it implicitly;
+additional telemetry sources are named explicitly before the colon:
+
+```bash
+stash cpu.usage \
+  -s fm:motion,mix=.2,ratio=2,index=3 \
+  -m syn.motion.freq=80..800/log~100ms \
+  -m cpu.temp:syn.motion.index=.5..8 \
+  -m gpu.usage:syn.motion.gain=.02...2
+```
+
+Here `cpu.usage` drives frequency through the bare mapping, `cpu.temp` drives
+the FM index, and `gpu.usage` drives gain. Writing another bare source is not a
+multi-source declaration. Values inside `-s` are fixed base values; telemetry
+must reach those numeric parameters through `-m`.
+
+Telemetry is sampled control-rate data, not an audio waveform. To use a signal
+from one synth inside another synth, route `syn.ID.out` to an audio-rate-capable
+`.mod` inlet:
+
+```bash
+stash cpu.usage \
+  -s fm:motion,mix=0,ratio=.125,index=5 \
+  -s wavetable:voice,table=metal \
+  -m syn.motion.freq=45..120/exp~100ms \
+  -m cpu.temp:syn.motion.index=1..8 \
+  -m syn.motion.out:syn.voice.position.mod=-.4...4
+```
+
+The silent `motion` node remains an audio-rate modulator because `mix=0` only
+removes it from the master mix.
+
+## 58. Capability coverage index
 
 | Capability | Examples |
 | --- | --- |
@@ -874,7 +908,7 @@ declared matching effect.
 | Scalar, individual-core, and vector telemetry | 1-2, 12-16, 54 |
 | Notes, note arrays, scales, modes, rhythms | 3, 12-21 |
 | Waveforms: sine, square, saw, triangle, noise | 4, 7-8, 47, 49 |
-| Mapping curves, smoothing, ranges, and multiple controls | 4, 9, 25, 33-36, 47, 51-52 |
+| Mapping curves, smoothing, ranges, and multiple controls | 4, 9, 25, 33-36, 47, 51-52, 57 |
 | Frequency, gain, pan, and gate targets | 4, 11, 32, 47, 55 |
 | Above, below, rise, and fall triggers; gate duration; ADSR | 12, 15-16, 48, 53 |
 | Tempo, swing, and all five rhythm controls | 17-21, 30-32, 55 |

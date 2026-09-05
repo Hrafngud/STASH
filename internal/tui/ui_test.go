@@ -45,7 +45,7 @@ func TestEditorUsesBubbleTeaResizeAndEditMessages(t *testing.T) {
 	}
 
 	view := state.View().Content
-	for _, want := range []string{"STASH — live instrument", "INSTRUMENT", "COMPLETIONS", "INVALID", "AUDIO IDLE"} {
+	for _, want := range []string{"STASH — live instrument", "INSTRUMENT", "INSPECTOR", "✕", "AUDIO IDLE"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view does not contain %q", want)
 		}

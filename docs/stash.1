@@ -58,6 +58,20 @@ complete number, so typing or pasting replaces that default.  Press
 .B q
 in normal mode or Ctrl-C to quit.
 .PP
+The first bare source is the primary telemetry control.  Additional telemetry
+sources belong before the colon in repeated mappings, for example
+.BR "\-m gpu.usage:syn.voice.gain=.02...2" .
+Omitting the control and colon uses the primary source.  Telemetry sources are
+control-rate values that map into parameters; they are not audio-rate signals.
+Only
+.B syn.ID.out
+is an audio-rate synth signal.
+.PP
+The editor chrome is neutral and reserves stable colors for telemetry-source
+and synth-node identities.  The inspector repeats the relationship using role
+labels and a source-to-target arrow, and marks it as a control-rate map or an
+audio-rate route so the meaning remains available without color.
+.PP
 .I SOURCE
 is a canonical source name such as
 .BR cpu.usage ,

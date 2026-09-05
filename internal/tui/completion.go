@@ -22,8 +22,8 @@ type Suggestion struct {
 
 var optionHelp = []Suggestion{
 	{"-s", "-s ", "add a synth node"},
-	{"-m", "-m ", "map a control to a sound parameter"},
-	{"--range", "--range ", "override a control's input range"},
+	{"-m", "-m ", "route telemetry, rhythm, or syn.ID.out to a parameter"},
+	{"--range", "--range ", "override a telemetry/rhythm control's input range"},
 	{"-w", "-w ", "select an oscillator waveform"},
 	{"-v", "-v " + numberText(cli.DefaultGain), "set output or synth-master gain"},
 	{"-t", "-t ", "define a telemetry trigger"},
@@ -134,7 +134,7 @@ func sourceSuggestions(registry *source.Registry, prefix, clausePrefix string, s
 		}
 		result = append(result, Suggestion{
 			Label: entry.Info.Name, Value: clausePrefix + entry.Info.Name + appendix,
-			Help: fmt.Sprintf("%s %s\n%s\n%s", entry.Info.Kind, entry.Info.Unit, rangeText, availability),
+			Help: fmt.Sprintf("telemetry control · %s %s\n%s\n%s", entry.Info.Kind, entry.Info.Unit, rangeText, availability),
 		})
 	}
 	return result
@@ -341,7 +341,7 @@ func controlSuggestions(registry *source.Registry, lines []string, prefix string
 	for _, synth := range partialSynths(lines) {
 		name := "syn." + synth.ID + ".out"
 		if strings.HasPrefix(name, prefix) {
-			result = append(result, Suggestion{Label: name, Value: name, Help: "bipolar audio-rate synth output"})
+			result = append(result, Suggestion{Label: name, Value: name, Help: "audio-rate synth signal; unlike telemetry, only audio-rate targets accept it"})
 		}
 	}
 	return result
