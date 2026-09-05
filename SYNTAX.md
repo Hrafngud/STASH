@@ -1487,7 +1487,8 @@ Tab             cycle semantic suggestions
 Up / Down       select suggestion
 Enter           accept suggestion, or finish when none is shown
 Ctrl+D          finish editing
-Left / Right    select numeric values, or move the cursor when none exist
+Left / Right    leave a selected numeric value, then move the cursor
+Alt+Left/Right  select numeric values
 Alt+Up/Down     nudge the selected numeric value
 Ctrl+Shift+D    delete the current clause
 Ctrl+M          mute or unmute the instrument

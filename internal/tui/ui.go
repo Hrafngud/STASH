@@ -307,16 +307,20 @@ func (state *editor) updateEdit(key tea.KeyPressMsg) tea.Cmd {
 	case "alt+down":
 		state.nudge(-1)
 		return nil
-	case "left", "alt+left":
-		if len(numericTokens([]rune(state.input.Value()))) == 0 {
-			break
+	case "left", "right":
+		if token, ok := state.currentChosenNumber(); ok {
+			state.numberChosen = false
+			if key.String() == "left" {
+				state.input.SetCursor(token.start)
+			} else {
+				state.input.SetCursor(token.end)
+			}
+			return nil
 		}
+	case "alt+left":
 		state.selectNumber(-1)
 		return nil
-	case "right", "alt+right":
-		if len(numericTokens([]rune(state.input.Value()))) == 0 {
-			break
-		}
+	case "alt+right":
 		state.selectNumber(1)
 		return nil
 	case "home", "end", "ctrl+a", "ctrl+e", "ctrl+b", "ctrl+f", "ctrl+left", "ctrl+right":
@@ -700,14 +704,14 @@ func (state *editor) helpView(width int) string {
 	if state.editing {
 		pairs = [][2]string{
 			{"type", "change"}, {"tab/↑↓", "choose"}, {"enter", "accept"},
-			{"←→", "value"}, {"alt+↑↓", "nudge"}, {"ctrl+d", "done"},
+			{"alt+←→", "value"}, {"alt+↑↓", "nudge"}, {"ctrl+d", "done"},
 			{deleteKey, "delete"}, {muteKey, "mute"},
 		}
 	}
 	if width < 60 {
 		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"}}
 		if state.editing {
-			pairs = [][2]string{{"←→/alt+↑↓", "select/nudge"}, {"ctrl+d", "done"}, {deleteKey, "delete"}, {muteKey, "mute"}}
+			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {deleteKey, "delete"}, {muteKey, "mute"}}
 		}
 	}
 	parts := make([]string, 0, len(pairs))

@@ -186,7 +186,7 @@ func synthSuggestions(value string) []Suggestion {
 	for _, parameterName := range sound.SortedParameterNames(spec) {
 		if strings.HasPrefix(parameterName, name) {
 			parameter := spec.Parameters[parameterName]
-			result = append(result, Suggestion{Label: parameterName + "=", Value: base + parameterName + "=" + numberText(parameter.Default), Help: parameterHelp(parameter.Description, parameter.Unit, parameter.Minimum, parameter.Maximum, parameter.Default, parameter.AudioRate)})
+			result = append(result, Suggestion{Label: parameterName + "=", Value: base + parameterName + "=" + parameterValueText(parameter.Default, parameter.Unit), Help: parameterHelp(parameter.Description, parameter.Unit, parameter.Minimum, parameter.Maximum, parameter.Default, parameter.AudioRate)})
 		}
 	}
 	configNames := make([]string, 0, len(spec.Config))
@@ -273,7 +273,7 @@ func effectSuggestions(clausePrefix, value, targetKind string) []Suggestion {
 	var result []Suggestion
 	for _, parameter := range spec.Parameters {
 		if strings.HasPrefix(parameter.Name, current) {
-			result = append(result, Suggestion{Label: parameter.Name + "=", Value: base + parameter.Name + "=" + numberText(parameter.Default), Help: effectParameterHelp(spec, parameter)})
+			result = append(result, Suggestion{Label: parameter.Name + "=", Value: base + parameter.Name + "=" + parameterValueText(parameter.Default, parameter.Unit), Help: effectParameterHelp(spec, parameter)})
 		}
 	}
 	return result
@@ -285,13 +285,21 @@ func effectDefaultValue(clausePrefix string, spec sound.EffectSpec) string {
 	}
 	arguments := make([]string, len(spec.Parameters))
 	for index, parameter := range spec.Parameters {
-		arguments[index] = parameter.Name + "=" + numberText(parameter.Default)
+		arguments[index] = parameter.Name + "=" + parameterValueText(parameter.Default, parameter.Unit)
 	}
 	return clausePrefix + spec.Name + ":" + strings.Join(arguments, ",")
 }
 
 func numberText(value float64) string {
 	return strconv.FormatFloat(value, 'g', -1, 64)
+}
+
+func parameterValueText(value float64, unit string) string {
+	text := numberText(value)
+	if unit == "s" {
+		text += "s"
+	}
+	return text
 }
 
 func effectSpecHelp(spec sound.EffectSpec) string {

@@ -75,6 +75,35 @@ func TestNumericCompletionsInsertDocumentedDefaults(t *testing.T) {
 	}
 }
 
+func TestDurationParameterCompletionsIncludeRequiredUnit(t *testing.T) {
+	synthItems := Complete(testRegistry(t), []string{"cpu.usage", "-s granular:g,sample=voice.wav,si"}, 1)
+	foundSize := false
+	for _, item := range synthItems {
+		if item.Label == "size=" {
+			foundSize = true
+			if item.Value != "-s granular:g,sample=voice.wav,size=0.1s" {
+				t.Fatalf("granular size completion = %q", item.Value)
+			}
+		}
+	}
+	if !foundSize {
+		t.Fatal("granular size completion is missing")
+	}
+
+	effectItems := Complete(testRegistry(t), []string{"cpu.usage", "-x delay"}, 1)
+	if len(effectItems) != 1 || effectItems[0].Value != "-x delay:time=0.15s,feedback=0.4,mix=0.25" {
+		t.Fatalf("delay completion = %#v", effectItems)
+	}
+	if analysis := Analyze([]string{"cpu.usage", effectItems[0].Value}, testRegistry(t)); analysis.State != Valid {
+		t.Fatalf("completed delay is invalid: %v", analysis.Err)
+	}
+
+	namedEffectItems := Complete(testRegistry(t), []string{"cpu.usage", "-x comp:a"}, 1)
+	if len(namedEffectItems) != 1 || namedEffectItems[0].Value != "-x comp:attack=0.005s" {
+		t.Fatalf("compressor attack completion = %#v", namedEffectItems)
+	}
+}
+
 func TestDeclaredNodesDriveModulationCompletion(t *testing.T) {
 	withBody := []string{"cpu.usage", "-s fm:bass", "-s sub:body", "-x reverb:.7,.4,.2", "-m gpu.usage:"}
 	items := labels(Complete(testRegistry(t), withBody, 4))

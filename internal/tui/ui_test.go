@@ -75,10 +75,41 @@ func TestEditorFindsAndCyclesNumericValuesForNudging(t *testing.T) {
 		t.Fatalf("automatically focused clause = %q", got)
 	}
 
-	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModAlt})
 	state.nudge(1)
 	if got := state.lines[1]; !strings.Contains(got, "index=4.04") {
 		t.Fatalf("cycled numeric clause = %q", got)
+	}
+}
+
+func TestArrowKeysLeaveNumericSelectionForTextEditing(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		key    tea.KeyPressMsg
+		cursor int
+		insert string
+		want   string
+	}{
+		{name: "left", key: tea.KeyPressMsg{Code: tea.KeyLeft}, cursor: len([]rune("-s fm:bass,index=")), insert: "x", want: "-s fm:bass,index=x4,gain=.2"},
+		{name: "right", key: tea.KeyPressMsg{Code: tea.KeyRight}, cursor: len([]rune("-s fm:bass,index=4")), insert: "x", want: "-s fm:bass,index=4x,gain=.2"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := newTestEditor(t)
+			state.lines[1] = "-s fm:bass,index=4,gain=.2"
+			state.active = 1
+			state.startEditing()
+			state.input.SetCursor(len([]rune("-s fm:bass,index=4")))
+			state.focusNearestNumber()
+
+			_, _ = state.Update(test.key)
+			if state.numberChosen || state.input.Position() != test.cursor {
+				t.Fatalf("selection left chosen=%t at cursor %d, want cursor %d", state.numberChosen, state.input.Position(), test.cursor)
+			}
+			_, _ = state.Update(tea.KeyPressMsg{Code: 'x', Text: test.insert})
+			if got := state.lines[1]; got != test.want {
+				t.Fatalf("edited clause = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
