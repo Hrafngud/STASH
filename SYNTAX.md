@@ -1428,6 +1428,11 @@ source and each remaining clause is one `OPTION VALUE` pair. Empty lines are
 temporary editing placeholders. The editor continuously compiles the lines to
 the same argv parser and planner used by argument-bearing invocations.
 
+Pasting a complete command beginning with `stash` in either normal or edit mode
+replaces the document. The command may be a one-line invocation or use the
+multiline `\` continuations emitted by export. Ordinary fragment pastes in edit
+mode continue to modify only the active clause or selected numeric value.
+
 Document states are:
 
 ```text

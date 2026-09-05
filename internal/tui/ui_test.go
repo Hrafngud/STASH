@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -175,6 +176,39 @@ func TestPasteReplacesWholeSelectedNumber(t *testing.T) {
 	_, _ = state.Update(tea.PasteMsg{Content: "12"})
 	if got := state.lines[1]; !strings.Contains(got, "index=12") || strings.Contains(got, "index=412") {
 		t.Fatalf("pasted numeric replacement = %q", got)
+	}
+}
+
+func TestEditorImportsTerminalCommandPaste(t *testing.T) {
+	command := "stash cpu.usage \\\n" +
+		"  -b 154 \\\n" +
+		"  -r rhythm:1/32:x--x-x-x--xx-x-- \\\n" +
+		"  -s fm:test,wave=saw,ratio=2,index=2,gain=.22 \\\n" +
+		"  -m syn.test.freq=90..420/exp~120ms \\\n" +
+		"  -v .9"
+	want := []string{
+		"cpu.usage",
+		"-b 154",
+		"-r rhythm:1/32:x--x-x-x--xx-x--",
+		"-s fm:test,wave=saw,ratio=2,index=2,gain=.22",
+		"-m syn.test.freq=90..420/exp~120ms",
+		"-v .9",
+	}
+	for _, editing := range []bool{false, true} {
+		state := newTestEditor(t)
+		if editing {
+			state.startEditing()
+		}
+		_, _ = state.Update(tea.PasteMsg{Content: command})
+		if !reflect.DeepEqual(state.lines, want) {
+			t.Fatalf("editing=%t: pasted lines = %#v, want %#v", editing, state.lines, want)
+		}
+		if state.editing || state.active != 0 {
+			t.Fatalf("editing=%t: editor remained editing=%t at line %d", editing, state.editing, state.active)
+		}
+		if state.analysis.State != Valid {
+			t.Fatalf("editing=%t: imported command is not valid: %v", editing, state.analysis.Err)
+		}
 	}
 }
 

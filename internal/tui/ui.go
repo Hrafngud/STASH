@@ -168,6 +168,10 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		state.enhancedKeys = message.SupportsKeyDisambiguation()
 		return state, nil
+	case tea.PasteMsg:
+		if state.importCommandPaste(message.Content) {
+			return state, nil
+		}
 	case tea.KeyPressMsg:
 		return state.updateKey(message)
 	}
@@ -186,6 +190,26 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return state, command
 	}
 	return state, nil
+}
+
+func (state *editor) importCommandPaste(content string) bool {
+	if !isCommandPaste(content) {
+		return false
+	}
+	lines, err := pastedCommandLines(content)
+	if err != nil {
+		state.message = "paste: " + err.Error()
+		return true
+	}
+	state.lines = lines
+	state.active = 0
+	state.editing = false
+	state.selected = 0
+	state.numberChosen = false
+	state.input.Blur()
+	state.message = ""
+	state.refresh(true)
+	return true
 }
 
 func (state *editor) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {

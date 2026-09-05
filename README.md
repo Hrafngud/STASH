@@ -51,6 +51,10 @@ to export the editor contents as an ordinary multiline `stash` command. On
 terminals without key disambiguation, the help bar shows the distinct fallbacks
 `Alt+D` for delete and `Alt+M` for mute/unmute.
 
+Paste an ordinary `stash` command anywhere in the TUI to replace the document.
+Both a one-line invocation and the multiline `\`-continued form produced by
+`Ctrl+G` are accepted.
+
 The editor keeps its chrome neutral and reserves color for patch identity. The
 same telemetry source or synth ID has the same color wherever it appears, while
 the inspector labels the selected `-m` clause as a control-rate map or an

@@ -33,6 +33,12 @@ opens the live instrument editor.  Each line is one ordinary CLI clause;
 semantic completion is derived from registered sources and the synth/effect
 registries.  Numeric synth and effect edits update the persistent audio
 session, while structural edits rebuild the graph inside the same process.
+.PP
+Pasting a complete command beginning with
+.B stash
+in normal or edit mode replaces the editor document.  One-line commands and
+multiline commands using shell backslash continuations are accepted.  Other
+pasted text continues to edit only the active clause.
 .SH LIVE INSTRUMENT EDITOR
 The editor starts with a playable instrument when an available telemetry
 source exists.  It marks the document valid, incomplete, or invalid and keeps

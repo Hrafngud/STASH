@@ -127,6 +127,49 @@ func Command(lines []string) string {
 	return "stash " + strings.Join(clauses, " \\\n  ")
 }
 
+// pastedCommandLines turns the shell-safe command emitted by Command back into
+// the editor's one-clause-per-line representation. It intentionally supports
+// STASH's command language rather than a general shell quoting language.
+func pastedCommandLines(input string) ([]string, error) {
+	input = strings.ReplaceAll(input, "\r\n", "\n")
+	input = strings.ReplaceAll(input, "\r", "\n")
+	input = strings.ReplaceAll(input, "\\\n", " ")
+	fields := strings.Fields(input)
+	if len(fields) == 0 || fields[0] != "stash" {
+		return nil, fmt.Errorf("expected a command beginning with stash")
+	}
+	fields = fields[1:]
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("stash command needs a source")
+	}
+	for _, field := range fields {
+		if field == "\\" {
+			return nil, fmt.Errorf("dangling line continuation")
+		}
+	}
+	if strings.HasPrefix(fields[0], "-") && fields[0] != "-" {
+		return nil, fmt.Errorf("stash command must begin with a source")
+	}
+
+	lines := []string{fields[0]}
+	for index := 1; index < len(fields); index += 2 {
+		option := fields[index]
+		if !strings.HasPrefix(option, "-") {
+			return nil, fmt.Errorf("unexpected positional argument %q", option)
+		}
+		if index+1 >= len(fields) {
+			return nil, fmt.Errorf("option %s needs a value", option)
+		}
+		lines = append(lines, option+" "+fields[index+1])
+	}
+	return lines, nil
+}
+
+func isCommandPaste(input string) bool {
+	fields := strings.Fields(input)
+	return len(fields) > 0 && fields[0] == "stash"
+}
+
 func initialLines(registry *source.Registry) []string {
 	sourceName := ""
 	if entry, ok := registry.Lookup("cpu.usage"); ok && entry.Available {

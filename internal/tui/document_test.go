@@ -55,6 +55,57 @@ func TestArgsRejectsMoreThanOneClauseValue(t *testing.T) {
 	}
 }
 
+func TestPastedCommandLinesImportsTerminalCommand(t *testing.T) {
+	input := "stash cpu.usage \\\n" +
+		"  -b 154 \\\n" +
+		"  -r rhythm:1/32:x--x-x-x--xx-x-- \\\n" +
+		"  -s fm:test,wave=saw,ratio=2,index=2,gain=.22 \\\n" +
+		"  -m syn.test.freq=90..420/exp~120ms \\\n" +
+		"  -v .9"
+	want := []string{
+		"cpu.usage",
+		"-b 154",
+		"-r rhythm:1/32:x--x-x-x--xx-x--",
+		"-s fm:test,wave=saw,ratio=2,index=2,gain=.22",
+		"-m syn.test.freq=90..420/exp~120ms",
+		"-v .9",
+	}
+	got, err := pastedCommandLines(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pastedCommandLines() = %#v, want %#v", got, want)
+	}
+	if command := Command(got); command != input {
+		t.Fatalf("Command(imported) = %q, want %q", command, input)
+	}
+}
+
+func TestPastedCommandLinesImportsOneLineCommand(t *testing.T) {
+	got, err := pastedCommandLines("stash cpu.usage -b 154 -s fm:test,gain=.22 -v .9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"cpu.usage", "-b 154", "-s fm:test,gain=.22", "-v .9"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pastedCommandLines() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPastedCommandLinesRejectsMalformedTerminalCommand(t *testing.T) {
+	for _, input := range []string{
+		"stash",
+		"stash -s fm:test",
+		"stash cpu.usage -s",
+		"stash cpu.usage \\",
+	} {
+		if _, err := pastedCommandLines(input); err == nil {
+			t.Errorf("pastedCommandLines(%q) unexpectedly succeeded", input)
+		}
+	}
+}
+
 func TestAnalyzeDistinguishesValidIncompleteAndInvalid(t *testing.T) {
 	registry := testRegistry(t)
 	tests := []struct {
