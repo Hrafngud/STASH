@@ -430,9 +430,11 @@ func (state *editor) insert(index int) tea.Cmd {
 }
 
 func (state *editor) resizeInput() {
-	width := state.width - 14
-	if state.width >= 96 {
-		width = state.width*3/5 - 14
+	contentWidth := state.width - 4
+	width := contentWidth - 11
+	if state.usesWideLayout() {
+		leftWidth, _ := wideLayoutWidths(contentWidth)
+		width = leftWidth - 11
 	}
 	if width < 12 {
 		width = 12
@@ -502,9 +504,25 @@ func (state *editor) render() string {
 	if width <= 0 {
 		width = 80
 	}
+	height := state.height
+	if height <= 0 {
+		height = 24
+	}
 	contentWidth := width - 4
 	if contentWidth < 36 {
 		contentWidth = 36
+	}
+	contentHeight := height - 2
+	if contentHeight < 20 {
+		contentHeight = 20
+	}
+
+	if state.usesWideLayout() {
+		leftWidth, rightWidth := wideLayoutWidths(contentWidth)
+		left := state.documentPanel(leftWidth, contentHeight)
+		right := state.rail(rightWidth, contentHeight)
+		main := lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+		return lipgloss.NewStyle().Padding(1, 2).Render(main)
 	}
 
 	header := lipgloss.JoinHorizontal(
@@ -513,24 +531,8 @@ func (state *editor) render() string {
 		"  ",
 		subtitleStyle.Render("telemetry-driven sound"),
 	)
-	mode := "NAVIGATE"
-	if state.editing {
-		mode = "EDIT CLAUSE"
-	}
-	headerGap := contentWidth - lipgloss.Width(header) - lipgloss.Width(modeStyle.Render(mode))
-	if headerGap < 1 {
-		headerGap = 1
-	}
-	header += strings.Repeat(" ", headerGap) + modeStyle.Render(mode)
 
-	main := state.documentPanel(contentWidth)
-	if contentWidth >= 92 {
-		leftWidth := contentWidth * 3 / 5
-		rightWidth := contentWidth - leftWidth - 2
-		main = lipgloss.JoinHorizontal(lipgloss.Top, state.documentPanel(leftWidth), "  ", state.inspectorPanel(rightWidth))
-	} else {
-		main += "\n" + state.inspectorPanel(contentWidth)
-	}
+	main := state.documentPanel(contentWidth, 0) + "\n" + state.inspectorPanel(contentWidth, 0)
 
 	status := state.statusView()
 	footer := state.helpView(contentWidth)
@@ -538,12 +540,67 @@ func (state *editor) render() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(view)
 }
 
-func (state *editor) documentPanel(width int) string {
+func (state *editor) usesWideLayout() bool {
+	return state.width >= 96 && state.height >= 24
+}
+
+func wideLayoutWidths(contentWidth int) (left, right int) {
+	right = contentWidth * 28 / 100
+	if right < 32 {
+		right = 32
+	}
+	if right > 40 {
+		right = 40
+	}
+	left = contentWidth - right - 2
+	return left, right
+}
+
+func (state *editor) rail(width, height int) string {
+	headerHeight := 2
+	panelsHeight := height - headerHeight - 3
+	suggestionsHeight := panelsHeight * 30 / 100
+	if suggestionsHeight < 5 {
+		suggestionsHeight = 5
+	}
+	if suggestionsHeight > 10 {
+		suggestionsHeight = 10
+	}
+	infoHeight := panelsHeight * 40 / 100
+	if infoHeight < 5 {
+		infoHeight = 5
+	}
+	if infoHeight > 13 {
+		infoHeight = 13
+	}
+	shortcutsHeight := panelsHeight - suggestionsHeight - infoHeight
+	if shortcutsHeight < 7 {
+		shortcutsHeight = 7
+		infoHeight = panelsHeight - suggestionsHeight - shortcutsHeight
+	}
+
+	header := lipgloss.NewStyle().Width(width).Height(headerHeight).MaxHeight(headerHeight).Render(
+		logoStyle.Render("STASH — live instrument") + "\n" +
+			lipgloss.NewStyle().MaxWidth(width).Render(state.statusSummary()),
+	)
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		"",
+		state.suggestionsPanel(width, suggestionsHeight),
+		"",
+		state.inspectorPanel(width, infoHeight),
+		"",
+		state.shortcutsPanel(width, shortcutsHeight),
+	)
+}
+
+func (state *editor) documentPanel(width, height int) string {
 	innerWidth := width - 4
 	if innerWidth < 24 {
 		innerWidth = 24
 	}
-	start, end := state.visibleLines()
+	start, end := state.visibleLines(height)
 	rows := make([]string, 0, end-start+2)
 	if start > 0 {
 		rows = append(rows, mutedStyle.Render(fmt.Sprintf("  ↑ %d earlier clause(s)", start)))
@@ -574,14 +631,36 @@ func (state *editor) documentPanel(width int) string {
 	if end < len(state.lines) {
 		rows = append(rows, mutedStyle.Render(fmt.Sprintf("  ↓ %d later clause(s)", len(state.lines)-end)))
 	}
-	title := sectionStyle.Render("INSTRUMENT") + mutedStyle.Render(fmt.Sprintf("  %d clauses  ·  color = identity", len(state.lines)))
-	body := title + "\n\n" + strings.Join(rows, "\n")
-	return panelStyle.Width(innerWidth).Render(body)
+	rowSeparator := "\n"
+	if height > 0 {
+		rowSeparator = "\n\n"
+	}
+	mode := "NAVIGATE"
+	if state.editing {
+		mode = "EDIT CLAUSE"
+	}
+	titleLeft := sectionStyle.Render("EDITOR") + mutedStyle.Render(fmt.Sprintf("  %d clauses", len(state.lines)))
+	titleRight := modeStyle.Render(mode)
+	titleGap := innerWidth - lipgloss.Width(titleLeft) - lipgloss.Width(titleRight)
+	if titleGap < 1 {
+		titleGap = 1
+	}
+	title := titleLeft + strings.Repeat(" ", titleGap) + titleRight
+	body := title + "\n\n" + strings.Join(rows, rowSeparator)
+	style := panelStyle.Width(width)
+	if height > 0 {
+		style = style.Height(height)
+	}
+	return style.Render(body)
 }
 
-func (state *editor) visibleLines() (int, int) {
+func (state *editor) visibleLines(panelHeight int) (int, int) {
 	limit := state.height - 16
-	if state.width < 96 {
+	if panelHeight > 0 {
+		// The wide editor gives every clause a blank row of separation. Reserve
+		// the border and heading, then turn the remaining height into rows.
+		limit = (panelHeight - 7) / 2
+	} else if state.width < 96 {
 		limit = state.height - 17
 		if state.editing {
 			limit = state.height - 21
@@ -589,9 +668,6 @@ func (state *editor) visibleLines() (int, int) {
 	}
 	if limit < 3 {
 		limit = 3
-	}
-	if limit > 12 {
-		limit = 12
 	}
 	if len(state.lines) <= limit {
 		return 0, len(state.lines)
@@ -606,21 +682,16 @@ func (state *editor) visibleLines() (int, int) {
 	return start, start + limit
 }
 
-func (state *editor) inspectorPanel(width int) string {
+func (state *editor) suggestionsPanel(width, height int) string {
 	innerWidth := width - 4
 	if innerWidth < 24 {
 		innerWidth = 24
 	}
-	title := sectionStyle.Render("INSPECTOR")
 	var body strings.Builder
-	body.WriteString(title)
-	body.WriteString("\n\n")
 	if state.editing && len(state.suggestions) > 0 {
-		body.WriteString(labelStyle.Render("COMPLETIONS"))
-		body.WriteByte('\n')
-		limit, helpLines := 6, 4
-		if state.width < 96 {
-			limit, helpLines = 2, 1
+		limit := height - 6
+		if limit < 1 {
+			limit = 1
 		}
 		start, end := suggestionWindow(state.selected, len(state.suggestions), limit)
 		for index := start; index < end; index++ {
@@ -639,13 +710,68 @@ func (state *editor) inspectorPanel(width int) string {
 			body.WriteByte('\n')
 		}
 		body.WriteByte('\n')
-		body.WriteString(mutedStyle.MaxWidth(innerWidth).Render(compactHelp(state.suggestions[state.selected].Help, helpLines)))
-	} else if state.analysis.Err != nil {
-		body.WriteString(errorDetailStyle.Width(innerWidth).Render(state.analysis.Err.Error()))
+		body.WriteString(mutedStyle.MaxWidth(innerWidth).Render(compactHelp(state.suggestions[state.selected].Help, 1)))
+	} else if state.editing {
+		body.WriteString(mutedStyle.Width(innerWidth).Render("No completions for this clause yet."))
 	} else {
-		body.WriteString(state.clauseInsight(innerWidth))
+		body.WriteString(mutedStyle.Width(innerWidth).Render("Edit a clause to see context-aware completions here."))
 	}
-	return panelStyle.Width(innerWidth).Render(strings.TrimRight(body.String(), "\n"))
+	return railPanel("SUGGESTIONS", body.String(), width, height)
+}
+
+func (state *editor) inspectorPanel(width, height int) string {
+	innerWidth := width - 4
+	if innerWidth < 24 {
+		innerWidth = 24
+	}
+	body := ""
+	if state.analysis.Err != nil {
+		body = errorDetailStyle.Width(innerWidth).Render(state.analysis.Err.Error())
+	} else {
+		body = state.clauseInsight(innerWidth)
+	}
+	if detail := state.detailMessage(); detail != "" {
+		body = labelStyle.Render("SESSION") + "\n" + mutedStyle.MaxWidth(innerWidth).Render(detail) + "\n\n" + body
+	}
+	if height <= 0 {
+		return panelStyle.Width(width).Render(sectionStyle.Render("INFO") + "\n\n" + body)
+	}
+	return railPanel("INFO", body, width, height)
+}
+
+func railPanel(title, body string, width, height int) string {
+	innerHeight := height - 3
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+	body = lipgloss.NewStyle().MaxHeight(innerHeight).Render(strings.TrimSpace(body))
+	return panelStyle.Width(width).Height(height).Render(sectionStyle.Render(title) + "\n" + body)
+}
+
+func (state *editor) shortcutsPanel(width, height int) string {
+	pairs := state.shortcutPairs()
+	innerWidth := width - 4
+	columns := 1
+	if innerWidth >= 28 {
+		columns = 2
+	}
+	columnWidth := innerWidth / columns
+	rows := make([]string, 0, (len(pairs)+columns-1)/columns)
+	for index := 0; index < len(pairs); index += columns {
+		cells := make([]string, 0, columns)
+		for column := 0; column < columns; column++ {
+			pairIndex := index + column
+			if pairIndex >= len(pairs) {
+				cells = append(cells, strings.Repeat(" ", columnWidth))
+				continue
+			}
+			pair := pairs[pairIndex]
+			cell := helpKeyStyle.Render(pair[0]) + " " + helpTextStyle.Render(pair[1])
+			cells = append(cells, lipgloss.NewStyle().Width(columnWidth).Render(cell))
+		}
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+	}
+	return railPanel("SHORTCUTS", strings.Join(rows, "\n"), width, height)
 }
 
 func compactHelp(help string, limit int) string {
@@ -673,6 +799,14 @@ func suggestionWindow(selected, count, limit int) (int, int) {
 }
 
 func (state *editor) statusView() string {
+	status := state.statusSummary()
+	if state.message != "" {
+		status += mutedStyle.Render("  ·  ") + state.message
+	}
+	return status
+}
+
+func (state *editor) statusSummary() string {
 	status := incompleteStyle.Render("… INCOMPLETE")
 	if state.analysis.State == Valid {
 		status = validStyle.Render("✓ VALID")
@@ -686,13 +820,38 @@ func (state *editor) statusView() string {
 		audioStatus = validStyle.Render("● AUDIO LIVE")
 	}
 	status += mutedStyle.Render("  ·  ") + audioStatus
-	if state.message != "" {
-		status += mutedStyle.Render("  ·  ") + state.message
-	}
 	return status
 }
 
+func (state *editor) detailMessage() string {
+	switch state.message {
+	case "", string(applyStarted), string(applyHot), string(applyRebuild), "instrument muted", "instrument unmuted":
+		return ""
+	default:
+		return state.message
+	}
+}
+
 func (state *editor) helpView(width int) string {
+	pairs := state.shortcutPairs()
+	if width < 60 {
+		muteKey, deleteKey := "alt+m", "alt+d"
+		if state.enhancedKeys {
+			muteKey, deleteKey = "ctrl+m", "ctrl+shift+d"
+		}
+		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"}}
+		if state.editing {
+			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {deleteKey, "delete"}, {muteKey, "mute"}}
+		}
+	}
+	parts := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		parts = append(parts, helpKeyStyle.Render(pair[0])+" "+helpTextStyle.Render(pair[1]))
+	}
+	return strings.Join(parts, helpTextStyle.Render("   "))
+}
+
+func (state *editor) shortcutPairs() [][2]string {
 	muteKey, deleteKey := "alt+m", "alt+d"
 	if state.enhancedKeys {
 		muteKey, deleteKey = "ctrl+m", "ctrl+shift+d"
@@ -708,17 +867,7 @@ func (state *editor) helpView(width int) string {
 			{deleteKey, "delete"}, {muteKey, "mute"},
 		}
 	}
-	if width < 60 {
-		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"}}
-		if state.editing {
-			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {deleteKey, "delete"}, {muteKey, "mute"}}
-		}
-	}
-	parts := make([]string, 0, len(pairs))
-	for _, pair := range pairs {
-		parts = append(parts, helpKeyStyle.Render(pair[0])+" "+helpTextStyle.Render(pair[1]))
-	}
-	return strings.Join(parts, helpTextStyle.Render("   "))
+	return pairs
 }
 
 func (state *editor) nudge(direction float64) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func newTestEditor(t *testing.T) *editor {
@@ -46,9 +47,37 @@ func TestEditorUsesBubbleTeaResizeAndEditMessages(t *testing.T) {
 	}
 
 	view := state.View().Content
-	for _, want := range []string{"STASH — live instrument", "INSTRUMENT", "INSPECTOR", "✕", "AUDIO IDLE"} {
+	for _, want := range []string{"STASH — live instrument", "EDITOR", "INFO", "✕", "AUDIO IDLE"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view does not contain %q", want)
+		}
+	}
+}
+
+func TestWideLayoutPrioritizesEditorAndUsesFullViewport(t *testing.T) {
+	left, right := wideLayoutWidths(116)
+	if left <= right*2 {
+		t.Fatalf("wide layout widths = %d and %d; editor should occupy more than two thirds of the workbench", left, right)
+	}
+
+	for _, height := range []int{24, 32} {
+		state := newTestEditor(t)
+		_, _ = state.Update(tea.WindowSizeMsg{Width: 120, Height: height})
+		if state.input.Width() < 64 {
+			t.Fatalf("wide editor input width = %d, want at least 64", state.input.Width())
+		}
+
+		view := state.View().Content
+		for _, want := range []string{"EDITOR", "SUGGESTIONS", "INFO", "SHORTCUTS"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("wide view does not contain %q", want)
+			}
+		}
+		if got := lipgloss.Width(view); got != 120 {
+			t.Errorf("wide view width = %d, want 120", got)
+		}
+		if got := lipgloss.Height(view); got != height {
+			t.Errorf("wide view height = %d, want %d", got, height)
 		}
 	}
 }
