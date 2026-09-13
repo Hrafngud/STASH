@@ -48,7 +48,8 @@ In normal mode, Up and Down select a clause, Enter edits,
 .B a
 adds below,
 Ctrl-Shift-D deletes, Ctrl-Up and Ctrl-Down reorder, Ctrl-M mutes or unmutes,
-and Ctrl-G exports the instrument as an ordinary multiline shell command.
+Ctrl-O toggles an animated ASCII-dot oscillator below the editor, and Ctrl-G
+exports the instrument as an ordinary multiline shell command.
 Ctrl-N and Ctrl-P add below or above.
 .PP
 When the terminal cannot distinguish modified control characters, the editor
@@ -58,7 +59,8 @@ active bindings.
 In edit mode, Tab cycles semantic completions, Up and Down select one, Enter
 accepts it, and Ctrl-D finishes editing.  Left and Right select numeric values,
 or move the cursor when the clause has none; Alt-Up and Alt-Down nudge the
-selected value.  Ctrl-Shift-D deletes the clause and Ctrl-M mutes or unmutes.
+selected value.  Ctrl-O toggles the oscillator, Ctrl-Shift-D deletes the clause,
+and Ctrl-M mutes or unmutes.
 Numeric completions insert documented defaults automatically and select the
 complete number, so typing or pasting replaces that default.  Press
 .B q

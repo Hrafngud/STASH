@@ -51,6 +51,10 @@ to export the editor contents as an ordinary multiline `stash` command. On
 terminals without key disambiguation, the help bar shows the distinct fallbacks
 `Alt+D` for delete and `Alt+M` for mute/unmute.
 
+Press `Ctrl+O` in either mode to reveal the animated ASCII-dot oscillator below
+the editor. On wide terminals it shares the editor column in an even vertical
+split; press `Ctrl+O` again to return the editor to full height.
+
 Paste an ordinary `stash` command anywhere in the TUI to replace the document.
 Both a one-line invocation and the multiline `\`-continued form produced by
 `Ctrl+G` are accepted.

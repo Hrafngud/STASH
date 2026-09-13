@@ -34,25 +34,27 @@ type Config struct {
 }
 
 type editor struct {
-	config       Config
-	lines        []string
-	active       int
-	editing      bool
-	input        textinput.Model
-	suggestions  []Suggestion
-	selected     int
-	analysis     Analysis
-	lastValid    *cli.Plan
-	message      string
-	width        int
-	height       int
-	exported     bool
-	muted        bool
-	enhancedKeys bool
-	numberChosen bool
-	chosenNumber numericRange
-	live         *liveEngine
-	backendLog   *diagnosticCapture
+	config          Config
+	lines           []string
+	active          int
+	editing         bool
+	input           textinput.Model
+	suggestions     []Suggestion
+	selected        int
+	analysis        Analysis
+	lastValid       *cli.Plan
+	message         string
+	width           int
+	height          int
+	exported        bool
+	muted           bool
+	oscillator      bool
+	oscillatorFrame uint64
+	enhancedKeys    bool
+	numberChosen    bool
+	chosenNumber    numericRange
+	live            *liveEngine
+	backendLog      *diagnosticCapture
 }
 
 type runtimeTick time.Time
@@ -164,6 +166,9 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return state, nil
 	case runtimeTick:
 		state.pollRuntime()
+		if state.oscillator && !state.muted && state.lastValid != nil {
+			state.oscillatorFrame++
+		}
 		return state, pollRuntimeCmd()
 	case tea.KeyboardEnhancementsMsg:
 		state.enhancedKeys = message.SupportsKeyDisambiguation()
@@ -229,6 +234,10 @@ func (state *editor) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if name == "ctrl+m" || name == "alt+m" {
 		state.toggleMute()
+		return state, nil
+	}
+	if name == "ctrl+o" {
+		state.oscillator = !state.oscillator
 		return state, nil
 	}
 	if name == "ctrl+shift+d" || name == "alt+d" {
@@ -519,7 +528,7 @@ func (state *editor) render() string {
 
 	if state.usesWideLayout() {
 		leftWidth, rightWidth := wideLayoutWidths(contentWidth)
-		left := state.documentPanel(leftWidth, contentHeight)
+		left := state.editorWorkspace(leftWidth, contentHeight)
 		right := state.rail(rightWidth, contentHeight)
 		main := lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
 		return lipgloss.NewStyle().Padding(1, 2).Render(main)
@@ -532,12 +541,30 @@ func (state *editor) render() string {
 		subtitleStyle.Render("telemetry-driven sound"),
 	)
 
-	main := state.documentPanel(contentWidth, 0) + "\n" + state.inspectorPanel(contentWidth, 0)
+	main := state.documentPanel(contentWidth, 0)
+	if state.oscillator {
+		main += "\n" + state.oscillatorPanel(contentWidth, min(12, max(8, contentHeight/2)))
+	}
+	main += "\n" + state.inspectorPanel(contentWidth, 0)
 
 	status := state.statusView()
 	footer := state.helpView(contentWidth)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, "", main, "", status, footer)
 	return lipgloss.NewStyle().Padding(1, 2).Render(view)
+}
+
+func (state *editor) editorWorkspace(width, height int) string {
+	if !state.oscillator {
+		return state.documentPanel(width, height)
+	}
+	editorHeight := (height + 1) / 2
+	oscillatorHeight := height - editorHeight - 1
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		state.documentPanel(width, editorHeight),
+		"",
+		state.oscillatorPanel(width, oscillatorHeight),
+	)
 }
 
 func (state *editor) usesWideLayout() bool {
@@ -839,9 +866,9 @@ func (state *editor) helpView(width int) string {
 		if state.enhancedKeys {
 			muteKey, deleteKey = "ctrl+m", "ctrl+shift+d"
 		}
-		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"}}
+		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {"ctrl+o", "osc"}, {"ctrl+g", "export"}, {"q", "quit"}}
 		if state.editing {
-			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {deleteKey, "delete"}, {muteKey, "mute"}}
+			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {"ctrl+o", "osc"}, {deleteKey, "delete"}, {muteKey, "mute"}}
 		}
 	}
 	parts := make([]string, 0, len(pairs))
@@ -858,13 +885,13 @@ func (state *editor) shortcutPairs() [][2]string {
 	}
 	pairs := [][2]string{
 		{"↑↓", "select"}, {"enter", "edit"}, {"a", "add"}, {deleteKey, "delete"},
-		{"ctrl+↑↓", "move"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"},
+		{"ctrl+o", "oscillator"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"},
 	}
 	if state.editing {
 		pairs = [][2]string{
 			{"type", "change"}, {"tab/↑↓", "choose"}, {"enter", "accept"},
 			{"alt+←→", "value"}, {"alt+↑↓", "nudge"}, {"ctrl+d", "done"},
-			{deleteKey, "delete"}, {muteKey, "mute"},
+			{"ctrl+o", "oscillator"}, {muteKey, "mute"},
 		}
 	}
 	return pairs

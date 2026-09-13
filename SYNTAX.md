@@ -1462,6 +1462,12 @@ also renders every selected mapping as a labeled source-to-target relationship
 and distinguishes control-rate maps from audio-rate routes, so color is not the
 only carrier of meaning.
 
+`Ctrl+O` toggles an animated oscillator rendered with ASCII dots. When visible,
+it sits directly below the clause editor; on wide terminals the two panels split
+the editor column vertically. The display follows the first active synth (or the
+legacy voice waveform), keeps the last valid signal visible through incomplete
+edits, and becomes a flat trace while muted.
+
 Normal-mode keys:
 
 ```text
@@ -1473,6 +1479,7 @@ Ctrl+Up/Down    reorder clause
 Ctrl+N          add clause below
 Ctrl+P          add clause above
 Ctrl+M          mute or unmute the instrument
+Ctrl+O          show or hide the ASCII oscillator
 Ctrl+G          export valid instrument and exit
 q / Ctrl+C      quit
 ```
@@ -1487,6 +1494,7 @@ Tab             cycle semantic suggestions
 Up / Down       select suggestion
 Enter           accept suggestion, or finish when none is shown
 Ctrl+D          finish editing
+Ctrl+O          show or hide the ASCII oscillator
 Left / Right    leave a selected numeric value, then move the cursor
 Alt+Left/Right  select numeric values
 Alt+Up/Down     nudge the selected numeric value
