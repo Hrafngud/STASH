@@ -1430,7 +1430,7 @@ the same argv parser and planner used by argument-bearing invocations.
 
 Pasting a complete command beginning with `stash` in either normal or edit mode
 replaces the document. The command may be a one-line invocation or use the
-multiline `\` continuations emitted by export. Ordinary fragment pastes in edit
+multiline `\` continuations used by preset files. Ordinary fragment pastes in edit
 mode continue to modify only the active clause or selected numeric value.
 
 Document states are:
@@ -1480,12 +1480,14 @@ Ctrl+N          add clause below
 Ctrl+P          add clause above
 Ctrl+M          mute or unmute the instrument
 Ctrl+O          show or hide the ASCII oscillator
-Ctrl+G          export valid instrument and exit
+Ctrl+G          name and save the valid instrument as a preset
+Ctrl+Shift+G    pick and load a saved preset
 q / Ctrl+C      quit
 ```
 
 Terminals that cannot distinguish modified control characters use `Alt+D` for
-delete and `Alt+M` for mute/unmute; the editor help bar shows the active keys.
+delete, `Alt+M` for mute/unmute, and `Alt+G` for the preset picker; the editor
+help bar shows the active keys.
 
 Edit-mode keys:
 
@@ -1510,7 +1512,9 @@ options and parameters with documented defaults insert those defaults when
 their completion is accepted. The complete numeric token remains selected so
 the next typed or pasted value replaces the default instead of appending to it.
 
-Export uses the ordinary shell-safe form:
+Presets are stored under `$XDG_CONFIG_HOME/stash/presets` (normally
+`~/.config/stash/presets`) as readable `.stash` files in the ordinary shell-safe
+form:
 
 ```bash
 stash cpu.usage \

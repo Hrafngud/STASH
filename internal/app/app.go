@@ -39,18 +39,11 @@ func (runner *Runner) RunInteractive(ctx context.Context, input io.Reader, outpu
 	if runner == nil || runner.Registry == nil {
 		return fmt.Errorf("execute interactive: runner or source registry is nil")
 	}
-	command, exported, err := tui.Run(ctx, tui.Config{
+	err := tui.Run(ctx, tui.Config{
 		Registry: runner.Registry, Backend: runner.Backend, Input: input, Output: output, Diagnostics: diagnostics,
 		SampleInterval: runner.SampleInterval, RhythmInterval: runner.RhythmInterval, MaxDelay: runner.MaxDelay,
 	})
-	if err != nil {
-		return err
-	}
-	if exported {
-		_, err = fmt.Fprintln(output, command)
-		return err
-	}
-	return nil
+	return err
 }
 
 // NewDefault detects the local Linux telemetry sources, registers stdin, and

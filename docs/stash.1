@@ -48,13 +48,18 @@ In normal mode, Up and Down select a clause, Enter edits,
 .B a
 adds below,
 Ctrl-Shift-D deletes, Ctrl-Up and Ctrl-Down reorder, Ctrl-M mutes or unmutes,
-Ctrl-O toggles an animated ASCII-dot oscillator below the editor, and Ctrl-G
-exports the instrument as an ordinary multiline shell command.
+Ctrl-O toggles an animated ASCII-dot oscillator below the editor, Ctrl-G asks
+for a name and saves the instrument as a preset without closing the editor,
+and Ctrl-Shift-G opens the saved-preset picker.
 Ctrl-N and Ctrl-P add below or above.
 .PP
 When the terminal cannot distinguish modified control characters, the editor
-uses Alt-D for delete and Alt-M for mute or unmute.  The help bar shows the
-active bindings.
+uses Alt-D for delete, Alt-M for mute or unmute, and Alt-G for the preset
+picker.  The help bar shows the active bindings.  Presets are ordinary
+multiline shell commands stored below
+.B $XDG_CONFIG_HOME/stash/presets
+(normally
+.BR ~/.config/stash/presets ).
 .PP
 In edit mode, Tab cycles semantic completions, Up and Down select one, Enter
 accepts it, and Ctrl-D finishes editing.  Left and Right select numeric values,

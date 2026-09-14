@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ type Config struct {
 	Input          io.Reader
 	Output         io.Writer
 	Diagnostics    io.Writer
+	PresetDir      string
 	SampleInterval func(string) time.Duration
 	RhythmInterval time.Duration
 	MaxDelay       time.Duration
@@ -46,7 +49,6 @@ type editor struct {
 	message         string
 	width           int
 	height          int
-	exported        bool
 	muted           bool
 	oscillator      bool
 	oscillatorFrame uint64
@@ -55,7 +57,20 @@ type editor struct {
 	chosenNumber    numericRange
 	live            *liveEngine
 	backendLog      *diagnosticCapture
+	presetMode      presetMode
+	presetInput     textinput.Model
+	presets         []preset
+	presetSelected  int
+	presetOverwrite bool
 }
+
+type presetMode uint8
+
+const (
+	presetClosed presetMode = iota
+	presetSaving
+	presetLoading
+)
 
 type runtimeTick time.Time
 
@@ -90,15 +105,21 @@ func adaptiveColor(light, dark string) compat.AdaptiveColor {
 	return compat.AdaptiveColor{Light: lipgloss.Color(light), Dark: lipgloss.Color(dark)}
 }
 
-// Run opens the Bubble Tea instrument editor. Ctrl-G exports and exits; q
-// exits without exporting. The returned command is written after Bubble Tea
-// has restored the terminal by the caller.
-func Run(ctx context.Context, config Config) (export string, exported bool, err error) {
+// Run opens the Bubble Tea instrument editor. Ctrl-G saves the current
+// instrument as a preset; q exits.
+func Run(ctx context.Context, config Config) error {
 	if ctx == nil {
-		return "", false, fmt.Errorf("open TUI: context is nil")
+		return fmt.Errorf("open TUI: context is nil")
 	}
 	if config.Registry == nil || config.Input == nil || config.Output == nil || config.Diagnostics == nil {
-		return "", false, fmt.Errorf("open TUI: registry, input, output, and diagnostics are required")
+		return fmt.Errorf("open TUI: registry, input, output, and diagnostics are required")
+	}
+	if config.PresetDir == "" {
+		var err error
+		config.PresetDir, err = defaultPresetDir()
+		if err != nil {
+			return err
+		}
 	}
 
 	state := newEditor(ctx, config)
@@ -110,21 +131,17 @@ func Run(ctx context.Context, config Config) (export string, exported bool, err 
 		tea.WithOutput(config.Output),
 		tea.WithoutSignalHandler(),
 	)
-	finalModel, runErr := program.Run()
+	_, runErr := program.Run()
 	if runErr != nil {
 		if errors.Is(runErr, tea.ErrProgramKilled) && ctx.Err() != nil {
-			return "", false, ctx.Err()
+			return ctx.Err()
 		}
 		if errors.Is(runErr, tea.ErrInterrupted) {
-			return "", false, nil
+			return nil
 		}
-		return "", false, runErr
+		return runErr
 	}
-	final, ok := finalModel.(*editor)
-	if !ok || !final.exported {
-		return "", false, nil
-	}
-	return Command(final.lines), true, nil
+	return nil
 }
 
 func newEditor(ctx context.Context, config Config) *editor {
@@ -137,9 +154,18 @@ func newEditor(ctx context.Context, config Config) *editor {
 	styles.Focused.Placeholder = mutedStyle.Italic(true)
 	styles.Cursor.Color = textColor
 	input.SetStyles(styles)
+	presetInput := textinput.New()
+	presetInput.Prompt = ""
+	presetInput.Placeholder = "preset name"
+	presetInput.CharLimit = 64
+	presetStyles := presetInput.Styles()
+	presetStyles.Focused.Text = lipgloss.NewStyle().Foreground(textColor)
+	presetStyles.Focused.Placeholder = mutedStyle.Italic(true)
+	presetStyles.Cursor.Color = textColor
+	presetInput.SetStyles(presetStyles)
 
 	state := &editor{
-		config: config, lines: initialLines(config.Registry), input: input,
+		config: config, lines: initialLines(config.Registry), input: input, presetInput: presetInput,
 		width: 80, height: 24, backendLog: &diagnosticCapture{},
 	}
 	state.live = &liveEngine{
@@ -173,6 +199,11 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		state.enhancedKeys = message.SupportsKeyDisambiguation()
 		return state, nil
+	}
+	if state.presetMode != presetClosed {
+		return state, state.updatePreset(message)
+	}
+	switch message := message.(type) {
 	case tea.PasteMsg:
 		if state.importCommandPaste(message.Content) {
 			return state, nil
@@ -224,13 +255,17 @@ func (state *editor) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if name == "ctrl+c" || !state.editing && (name == "q" || name == "esc") {
 		return state, tea.Quit
 	}
+	if name == "ctrl+shift+g" || name == "alt+g" {
+		state.openPresetPicker()
+		return state, nil
+	}
 	if name == "ctrl+g" {
 		if state.analysis.State != Valid {
-			state.message = "finish the instrument before exporting"
+			state.message = "finish the instrument before saving a preset"
 			return state, nil
 		}
-		state.exported = true
-		return state, tea.Quit
+		state.openPresetSave()
+		return state, nil
 	}
 	if name == "ctrl+m" || name == "alt+m" {
 		state.toggleMute()
@@ -258,6 +293,128 @@ func (state *editor) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return state, state.updateEdit(key)
 	}
 	return state, state.updateNormal(name)
+}
+
+func (state *editor) openPresetSave() {
+	if state.editing {
+		state.finishEditing()
+	}
+	state.presetMode = presetSaving
+	state.presetInput.SetValue("")
+	state.presetInput.CursorEnd()
+	state.presetOverwrite = false
+	state.message = ""
+	state.presetInput.Focus()
+}
+
+func (state *editor) openPresetPicker() {
+	if state.editing {
+		state.finishEditing()
+	}
+	presets, err := listPresets(state.config.PresetDir)
+	if err != nil {
+		state.message = err.Error()
+		return
+	}
+	state.presets = presets
+	state.presetSelected = 0
+	state.presetMode = presetLoading
+	state.message = ""
+	state.input.Blur()
+}
+
+func (state *editor) closePreset() tea.Cmd {
+	state.presetMode = presetClosed
+	state.presetOverwrite = false
+	state.presetInput.Blur()
+	return nil
+}
+
+func (state *editor) updatePreset(message tea.Msg) tea.Cmd {
+	key, isKey := message.(tea.KeyPressMsg)
+	if !isKey {
+		if state.presetMode == presetSaving {
+			var command tea.Cmd
+			state.presetInput, command = state.presetInput.Update(message)
+			return command
+		}
+		return nil
+	}
+	key = printableKey(key)
+	name := key.String()
+	if name == "esc" || name == "ctrl+c" {
+		state.message = "preset action cancelled"
+		return state.closePreset()
+	}
+
+	if state.presetMode == presetLoading {
+		switch name {
+		case "up", "k", "shift+tab":
+			if len(state.presets) > 0 {
+				state.presetSelected = (state.presetSelected - 1 + len(state.presets)) % len(state.presets)
+			}
+		case "down", "j", "tab":
+			if len(state.presets) > 0 {
+				state.presetSelected = (state.presetSelected + 1) % len(state.presets)
+			}
+		case "enter":
+			if len(state.presets) == 0 {
+				return nil
+			}
+			item := state.presets[state.presetSelected]
+			lines, err := loadPreset(item)
+			if err != nil {
+				state.message = err.Error()
+				return nil
+			}
+			state.lines = lines
+			state.active = 0
+			state.selected = 0
+			state.numberChosen = false
+			state.closePreset()
+			state.refresh(true)
+			state.message = fmt.Sprintf("loaded preset %q", item.name)
+		}
+		return nil
+	}
+
+	if name == "enter" {
+		presetName, err := presetName(state.presetInput.Value())
+		if err != nil {
+			state.message = err.Error()
+			return nil
+		}
+		path := filepath.Join(state.config.PresetDir, presetName+presetExtension)
+		if _, err := os.Stat(path); err == nil && !state.presetOverwrite {
+			state.presetOverwrite = true
+			state.message = "preset already exists; press enter again to replace it"
+			return nil
+		} else if err != nil && !os.IsNotExist(err) {
+			state.message = "inspect preset: " + err.Error()
+			return nil
+		}
+		savedName, replaced, err := savePreset(state.config.PresetDir, presetName, Command(state.lines))
+		if err != nil {
+			state.message = err.Error()
+			return nil
+		}
+		state.closePreset()
+		verb := "saved"
+		if replaced {
+			verb = "updated"
+		}
+		state.message = fmt.Sprintf("%s preset %q", verb, savedName)
+		return nil
+	}
+
+	before := state.presetInput.Value()
+	var command tea.Cmd
+	state.presetInput, command = state.presetInput.Update(key)
+	if state.presetInput.Value() != before {
+		state.presetOverwrite = false
+		state.message = ""
+	}
+	return command
 }
 
 func (state *editor) updateNormal(key string) tea.Cmd {
@@ -525,6 +682,9 @@ func (state *editor) render() string {
 	if contentHeight < 20 {
 		contentHeight = 20
 	}
+	if state.presetMode != presetClosed {
+		return state.presetView(width, height)
+	}
 
 	if state.usesWideLayout() {
 		leftWidth, rightWidth := wideLayoutWidths(contentWidth)
@@ -551,6 +711,58 @@ func (state *editor) render() string {
 	footer := state.helpView(contentWidth)
 	view := lipgloss.JoinVertical(lipgloss.Left, header, "", main, "", status, footer)
 	return lipgloss.NewStyle().Padding(1, 2).Render(view)
+}
+
+func (state *editor) presetView(width, height int) string {
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	dialogWidth := min(64, max(36, width-8))
+	innerWidth := dialogWidth - 4
+	var title, body, footer string
+	if state.presetMode == presetSaving {
+		title = "SAVE PRESET"
+		body = mutedStyle.Render("Name this instrument") + "\n\n" +
+			lipgloss.NewStyle().Background(surfaceColor).Padding(0, 1).Width(innerWidth).Render(state.presetInput.View())
+		footer = helpKeyStyle.Render("enter") + helpTextStyle.Render(" save") +
+			helpTextStyle.Render("   ") + helpKeyStyle.Render("esc") + helpTextStyle.Render(" cancel")
+	} else {
+		title = "LOAD PRESET"
+		if len(state.presets) == 0 {
+			body = mutedStyle.Render("No presets saved yet. Press Ctrl+G in the editor to create one.")
+		} else {
+			limit := min(10, max(3, height-12))
+			start, end := suggestionWindow(state.presetSelected, len(state.presets), limit)
+			rows := make([]string, 0, end-start+2)
+			if start > 0 {
+				rows = append(rows, mutedStyle.Render(fmt.Sprintf("  ↑ %d earlier", start)))
+			}
+			for index := start; index < end; index++ {
+				prefix := "  "
+				style := lipgloss.NewStyle()
+				if index == state.presetSelected {
+					prefix = "› "
+					style = selectedStyle
+				}
+				rows = append(rows, style.MaxWidth(innerWidth).Render(prefix+state.presets[index].name))
+			}
+			if end < len(state.presets) {
+				rows = append(rows, mutedStyle.Render(fmt.Sprintf("  ↓ %d more", len(state.presets)-end)))
+			}
+			body = strings.Join(rows, "\n")
+		}
+		footer = helpKeyStyle.Render("↑↓") + helpTextStyle.Render(" choose") +
+			helpTextStyle.Render("   ") + helpKeyStyle.Render("enter") + helpTextStyle.Render(" load") +
+			helpTextStyle.Render("   ") + helpKeyStyle.Render("esc") + helpTextStyle.Render(" cancel")
+	}
+	if state.message != "" {
+		body += "\n\n" + errorDetailStyle.MaxWidth(innerWidth).Render(state.message)
+	}
+	dialog := panelStyle.Width(dialogWidth).Render(sectionStyle.Render(title) + "\n\n" + body + "\n\n" + footer)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (state *editor) editorWorkspace(width, height int) string {
@@ -862,11 +1074,11 @@ func (state *editor) detailMessage() string {
 func (state *editor) helpView(width int) string {
 	pairs := state.shortcutPairs()
 	if width < 60 {
-		muteKey, deleteKey := "alt+m", "alt+d"
+		muteKey, deleteKey, presetsKey := "alt+m", "alt+d", "alt+g"
 		if state.enhancedKeys {
-			muteKey, deleteKey = "ctrl+m", "ctrl+shift+d"
+			muteKey, deleteKey, presetsKey = "ctrl+m", "ctrl+shift+d", "ctrl+shift+g"
 		}
-		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {"ctrl+o", "osc"}, {"ctrl+g", "export"}, {"q", "quit"}}
+		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {"ctrl+o", "osc"}, {"ctrl+g", "save"}, {presetsKey, "presets"}, {"q", "quit"}}
 		if state.editing {
 			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {"ctrl+o", "osc"}, {deleteKey, "delete"}, {muteKey, "mute"}}
 		}
@@ -879,13 +1091,13 @@ func (state *editor) helpView(width int) string {
 }
 
 func (state *editor) shortcutPairs() [][2]string {
-	muteKey, deleteKey := "alt+m", "alt+d"
+	muteKey, deleteKey, presetsKey := "alt+m", "alt+d", "alt+g"
 	if state.enhancedKeys {
-		muteKey, deleteKey = "ctrl+m", "ctrl+shift+d"
+		muteKey, deleteKey, presetsKey = "ctrl+m", "ctrl+shift+d", "ctrl+shift+g"
 	}
 	pairs := [][2]string{
 		{"↑↓", "select"}, {"enter", "edit"}, {"a", "add"}, {deleteKey, "delete"},
-		{"ctrl+o", "oscillator"}, {muteKey, "mute"}, {"ctrl+g", "export"}, {"q", "quit"},
+		{"ctrl+o", "oscillator"}, {muteKey, "mute"}, {"ctrl+g", "save preset"}, {presetsKey, "load preset"}, {"q", "quit"},
 	}
 	if state.editing {
 		pairs = [][2]string{

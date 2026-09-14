@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -186,6 +188,7 @@ func TestEditorControlShortcutsDeleteAndMute(t *testing.T) {
 
 func TestEditorLegacyTerminalFallbackShortcuts(t *testing.T) {
 	state := newTestEditor(t)
+	state.config.PresetDir = t.TempDir()
 	_, _ = state.Update(tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt})
 	if !state.muted {
 		t.Fatal("Alt+M did not mute without enhanced keyboard support")
@@ -195,12 +198,17 @@ func TestEditorLegacyTerminalFallbackShortcuts(t *testing.T) {
 	if len(state.lines) != 1 {
 		t.Fatalf("Alt+D left lines=%v", state.lines)
 	}
-	if !strings.Contains(state.helpView(80), "alt+m") {
+	if !strings.Contains(state.helpView(80), "alt+m") || !strings.Contains(state.helpView(80), "alt+g") {
 		t.Fatal("fallback shortcut is missing from help")
 	}
+	_, _ = state.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModAlt})
+	if state.presetMode != presetLoading {
+		t.Fatal("Alt+G did not open the preset picker")
+	}
+	state.closePreset()
 
 	_, _ = state.Update(tea.KeyboardEnhancementsMsg{Flags: 1})
-	if !state.enhancedKeys || !strings.Contains(state.helpView(80), "ctrl+m") {
+	if !state.enhancedKeys || !strings.Contains(state.helpView(80), "ctrl+m") || !strings.Contains(state.helpView(80), "ctrl+shift+g") {
 		t.Fatal("enhanced shortcut is missing from help")
 	}
 	view := state.View()
@@ -290,17 +298,85 @@ func TestNumericSelectionViewHighlightsWholeValue(t *testing.T) {
 	}
 }
 
-func TestRunExportsAfterBubbleTeaRestoresScreen(t *testing.T) {
-	var output bytes.Buffer
-	command, exported, err := Run(context.Background(), Config{
-		Registry: testRegistry(t), Input: strings.NewReader("\a"),
-		Output: &output, Diagnostics: io.Discard,
-	})
+func TestEditorSavesPresetWithoutQuitting(t *testing.T) {
+	state := newTestEditor(t)
+	state.config.PresetDir = t.TempDir()
+
+	_, command := state.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if command != nil || state.presetMode != presetSaving {
+		t.Fatalf("Ctrl+G command=%v mode=%v, want save dialog without quit", command, state.presetMode)
+	}
+	_, _ = state.Update(tea.PasteMsg{Content: "Night Drive"})
+	_, command = state.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if command != nil || state.presetMode != presetClosed {
+		t.Fatalf("save command=%v mode=%v, want editor to remain open", command, state.presetMode)
+	}
+	contents, err := os.ReadFile(filepath.Join(state.config.PresetDir, "Night Drive.stash"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !exported || !strings.HasPrefix(command, "stash cpu.usage") {
-		t.Fatalf("export = %q, %t", command, exported)
+	if got, want := string(contents), Command(state.lines)+"\n"; got != want {
+		t.Fatalf("saved preset = %q, want %q", got, want)
+	}
+	if !strings.Contains(state.message, `saved preset "Night Drive"`) {
+		t.Fatalf("save message = %q", state.message)
+	}
+}
+
+func TestEditorLoadsPickedPreset(t *testing.T) {
+	state := newTestEditor(t)
+	state.config.PresetDir = t.TempDir()
+	want := []string{"cpu.usage", "-w square", "-m freq=120..600"}
+	if _, _, err := savePreset(state.config.PresetDir, "Square Lead", Command(want)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, command := state.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl | tea.ModShift})
+	if command != nil || state.presetMode != presetLoading || len(state.presets) != 1 {
+		t.Fatalf("Ctrl+Shift+G command=%v mode=%v presets=%v", command, state.presetMode, state.presets)
+	}
+	if !strings.Contains(state.View().Content, "LOAD PRESET") {
+		t.Fatal("preset picker is not visible")
+	}
+	_, command = state.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if command != nil || state.presetMode != presetClosed {
+		t.Fatalf("load command=%v mode=%v, want editor to remain open", command, state.presetMode)
+	}
+	if !reflect.DeepEqual(state.lines, want) {
+		t.Fatalf("loaded lines = %#v, want %#v", state.lines, want)
+	}
+	if !strings.Contains(state.message, `loaded preset "Square Lead"`) {
+		t.Fatalf("load message = %q", state.message)
+	}
+}
+
+func TestEditorConfirmsBeforeReplacingPreset(t *testing.T) {
+	state := newTestEditor(t)
+	state.config.PresetDir = t.TempDir()
+	if _, _, err := savePreset(state.config.PresetDir, "Bass", "stash old.source"); err != nil {
+		t.Fatal(err)
+	}
+	state.openPresetSave()
+	state.presetInput.SetValue("Bass")
+
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if state.presetMode != presetSaving || !state.presetOverwrite {
+		t.Fatal("first Enter did not request overwrite confirmation")
+	}
+	_, _ = state.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if state.presetMode != presetClosed || !strings.Contains(state.message, "updated preset") {
+		t.Fatalf("second Enter mode=%v message=%q", state.presetMode, state.message)
+	}
+}
+
+func TestRunRestoresScreenAfterQuit(t *testing.T) {
+	var output bytes.Buffer
+	err := Run(context.Background(), Config{
+		Registry: testRegistry(t), Input: strings.NewReader("q"),
+		Output: &output, Diagnostics: io.Discard, PresetDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "\x1b[?1049l") {
 		t.Fatalf("Bubble Tea did not restore the primary screen: %q", output.String())

@@ -21,7 +21,8 @@ Usage:
 
 Interactive editor:
   No arguments                    Open the live multiline instrument editor
-  Ctrl-G                          Export an ordinary stash command and exit
+  Ctrl-G                          Name and save the current instrument preset
+  Ctrl-Shift-G                    Pick and load a saved preset
 
 Sources:
   SOURCE                         Canonical source name, such as cpu.usage

@@ -47,17 +47,20 @@ process. Numeric completions insert their documented defaults; in edit mode,
 the entire active value is highlighted, typing or pasting replaces it,
 `Left/Right` selects another value, and `Alt+Up/Down` nudges it. Press `Ctrl+D` to
 finish a line, `Ctrl+Shift+D` to delete it, `Ctrl+M` to mute/unmute, or `Ctrl+G`
-to export the editor contents as an ordinary multiline `stash` command. On
-terminals without key disambiguation, the help bar shows the distinct fallbacks
-`Alt+D` for delete and `Alt+M` for mute/unmute.
+to name and save the current instrument as a preset without leaving the editor.
+Press `Ctrl+Shift+G` to pick and load a saved preset. Presets are readable
+multiline commands stored below `$XDG_CONFIG_HOME/stash/presets` (normally
+`~/.config/stash/presets`). On terminals without key disambiguation, the help
+bar shows the distinct fallbacks `Alt+D` for delete, `Alt+M` for mute/unmute,
+and `Alt+G` for the preset picker.
 
 Press `Ctrl+O` in either mode to reveal the animated ASCII-dot oscillator below
 the editor. On wide terminals it shares the editor column in an even vertical
 split; press `Ctrl+O` again to return the editor to full height.
 
 Paste an ordinary `stash` command anywhere in the TUI to replace the document.
-Both a one-line invocation and the multiline `\`-continued form produced by
-`Ctrl+G` are accepted.
+Both a one-line invocation and the multiline `\`-continued form used by preset
+files are accepted.
 
 The editor keeps its chrome neutral and reserves color for patch identity. The
 same telemetry source or synth ID has the same color wherever it appears, while
