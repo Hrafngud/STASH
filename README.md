@@ -1,130 +1,183 @@
 # STASH
 
-STASH — Sound Telemetry Auto SHell — is a Linux-first command-line instrument that turns live hardware and operating-system telemetry into sound.
+**Turn your Linux machine into a playable instrument.**
+
+STASH (Sound Telemetry Auto SHell) is a Linux-first command-line tool that
+maps live system activity—CPU load, temperature, memory, disk, network, and
+GPU telemetry—to sound. Use it to hear a build finish, turn network traffic
+into a drone, create a performance patch from hardware sensors, or simply
+explore what your computer is doing without watching another graph.
 
 ```bash
 stash cpu.usage -w sine -m freq=80..2k/exp~150ms
 ```
 
-Telemetry sources control composable synth graphs and ordered effects through a small, shell-safe CLI. Csound is the private synthesis backend.
+The command above reads total CPU usage, maps it exponentially from 80 Hz to
+2 kHz, smooths changes over 150 ms, and sends the result to a sine oscillator.
+Csound handles audio behind the scenes; STASH gives it a discoverable,
+shell-friendly interface and an optional live terminal editor.
+
+## What you can do
+
+- Read telemetry as plain numeric output, with no audio engine required.
+- Sonify CPU, memory, network, disk, AMD/NVIDIA GPU, or newline-delimited
+  values from another command.
+- Build patches from subtractive, FM, PM, AM, ring, additive, wavetable,
+  Karplus–Strong, modal, and granular synths.
+- Map several telemetry sources to synth and effect parameters at once.
+- Add notes, scales, modes, triggers, rhythms, envelopes, filters, and an
+  ordered chain of modulatable effects.
+- Route one synth into another at audio rate for modular patches.
+- Create, hear, edit, and save instruments in the full-screen terminal UI.
+- Stream raw 48 kHz stereo float32 PCM into PipeWire or another audio tool.
+
+STASH detects sources at runtime. Unsupported or unreadable hardware remains
+visible in discovery output with an explanation instead of silently
+disappearing.
 
 ## Requirements
 
 - Linux with readable `/proc` and `/sys` telemetry interfaces
-- Go 1.25 or newer to build
-- Csound 6 or newer for device audio and raw PCM output
+- [Go](https://go.dev/) 1.25 or newer to build from source
+- [Csound](https://csound.com/) 6 or newer for live audio and raw PCM output
 
-Telemetry and discovery commands do not require Csound. Hardware-specific sources are reported as unavailable when STASH cannot detect a reliable local interface.
+Csound is optional if you only want telemetry, discovery, or primitive
+resolution. GPU metrics depend on the interfaces exposed by your hardware and
+driver; STASH supports AMD through sysfs and NVIDIA through NVML when present.
 
-## Build
+## Install
 
-```bash
-go build -o stash ./cmd/stash
-```
+### Arch Linux and Manjaro
 
-Put the resulting `stash` binary on `PATH`, or run it as `./stash` from the repository.
-
-To install the binary and its `stash(1)` manual for the current user on
-Manjaro or Arch Linux, run:
+Clone the repository and run the included user-local installer:
 
 ```bash
+git clone https://github.com/zalmo/stash.git
+cd stash
 ./install.sh
 ```
 
-## Quick start
-
-Open the live instrument editor by running STASH without arguments:
+The script installs missing packages with `pacman`, builds STASH, and installs
+the binary and manual under `~/.local`. If necessary, add the binary directory
+to your shell configuration:
 
 ```bash
-stash
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The Bubble Tea editor starts with a playable instrument, keeps each existing
-CLI clause on its own line, and offers context-sensitive source, synth, effect,
-control, and target completion. Numeric synth/effect edits are applied to the
-running audio session; structural edits rebuild the graph inside the same
-process. Numeric completions insert their documented defaults; in edit mode,
-the entire active value is highlighted, typing or pasting replaces it,
-`Left/Right` selects another value, and `Alt+Up/Down` nudges it. Press `Ctrl+D` to
-finish a line, `Ctrl+Shift+D` to delete it, `Ctrl+M` to mute/unmute, or `Ctrl+G`
-to name and save the current instrument as a preset without leaving the editor.
-Press `Ctrl+Shift+G` to pick and load a saved preset. Presets are readable
-multiline commands stored below `$XDG_CONFIG_HOME/stash/presets` (normally
-`~/.config/stash/presets`). On terminals without key disambiguation, the help
-bar shows the distinct fallbacks `Alt+D` for delete, `Alt+M` for mute/unmute,
-and `Alt+G` for the preset picker.
+### Other Linux distributions
 
-Press `Ctrl+O` in either mode to reveal the animated ASCII-dot oscillator below
-the editor. On wide terminals it shares the editor column in an even vertical
-split; press `Ctrl+O` again to return the editor to full height.
+Install Go and Csound with your distribution's package manager, then build and
+install STASH from the repository:
 
-Paste an ordinary `stash` command anywhere in the TUI to replace the document.
-Both a one-line invocation and the multiline `\`-continued form used by preset
-files are accepted.
+```bash
+git clone https://github.com/zalmo/stash.git
+cd stash
+go build -o stash ./cmd/stash
+install -Dm755 stash "$HOME/.local/bin/stash"
+install -Dm644 docs/stash.1 "$HOME/.local/share/man/man1/stash.1"
+```
 
-The editor keeps its chrome neutral and reserves color for patch identity. The
-same telemetry source or synth ID has the same color wherever it appears, while
-the inspector labels the selected `-m` clause as a control-rate map or an
-audio-rate route. Names, arrows, and role labels preserve the same meaning in a
-monochrome terminal.
+Confirm that the installation is available:
 
-Read aggregate CPU usage as machine-oriented numeric lines:
+```bash
+stash --help
+stash -l cpu
+```
+
+If `stash` is not found, add `~/.local/bin` to `PATH` as shown above. If the
+manual is not found immediately, run `mandb` or start a new shell.
+
+## First instrument: a short walkthrough
+
+Start by asking STASH what it can read on your machine:
+
+```bash
+stash -l
+```
+
+The output includes each source's unit, value shape, and availability. Inspect
+one source for its natural range and any hardware-specific details:
+
+```bash
+stash -i cpu.usage
+```
+
+Read it without generating sound:
 
 ```bash
 stash cpu.usage
 ```
 
-Discover and inspect sources:
+Now turn it into pitch. Start with a low system volume, then run:
 
 ```bash
-stash -l
-stash -l cpu
-stash -i cpu.usage
+stash cpu.usage -w sine -m freq=80..2k/exp~150ms
 ```
 
-Discover synths and resolve a declaration:
+The command follows a small mental model:
+
+```text
+telemetry source  ->  mapping  ->  synth/effect parameter
+cpu.usage         ->  80..2k   ->  frequency
+```
+
+- `cpu.usage` selects the live control source.
+- `-w sine` enables a sine-wave voice.
+- `-m freq=80..2k/exp~150ms` maps the source to pitch, uses an exponential
+  curve, and smooths abrupt changes.
+
+Add a filter and effects to shape the result:
 
 ```bash
-stash -l syn
-stash -i syn.fm
-stash -p syn.fm:bass,ratio=2,index=4
+stash cpu.usage \
+  -w saw \
+  -m freq=80..1k/exp~100ms \
+  -f lp:3k \
+  -x drive:.2 \
+  -x reverb:size=.7,damp=.4,mix=.25
 ```
 
-Show the command summary, or open the complete installed manual:
+Press `Ctrl+C` to stop any live telemetry or audio command.
+
+## Live editor
+
+Run STASH with no arguments to open the terminal instrument editor:
 
 ```bash
-stash --help
-stash -h
-man stash
+stash
 ```
 
-Resolve musical primitives:
+The editor starts with a playable patch and teaches the same syntax used by
+the CLI. Completions are aware of the sources available on your machine and
+the parameters valid for each synth or effect. The last valid patch keeps
+playing while you edit, and numeric changes update the current audio session.
 
-```bash
-stash -p C4
-stash -p mode:E3:phrygian:12
-stash -p rhythm:120:1/8:x-x-x-x-
-```
+Useful controls:
 
-Sonify CPU usage through the default audio device:
+| Key | Action |
+| --- | --- |
+| `Enter` | Edit the selected clause |
+| `a` or `Ctrl+N` | Add a clause below |
+| `Tab` | Cycle context-aware suggestions while editing |
+| `Alt+Up` / `Alt+Down` | Nudge the selected numeric value |
+| `Ctrl+M` | Mute or unmute |
+| `Ctrl+O` | Toggle the ASCII oscillator display |
+| `Ctrl+G` | Save the current instrument as a preset |
+| `Ctrl+Shift+G` | Load a preset |
+| `q` or `Ctrl+C` | Quit |
 
-```bash
-stash cpu.usage -w saw -m freq=80..1k/exp~100ms -f lp:3k -x drive:.2
-```
+Presets are readable `.stash` commands stored in
+`$XDG_CONFIG_HOME/stash/presets`, or `~/.config/stash/presets` by default. You
+can also paste a complete one-line or `\`-continued `stash` command into the
+editor to replace the current patch.
 
-Turn telemetry into effect motion. Effect arguments may be positional or
-named, and every numeric argument automatically becomes a modulation target:
+## Going further
 
-```bash
-stash cpu.usage -w saw \
-  -x phaser:rate=.3,depth=.7,feedback=.2,stages=6 \
-  -x reverb:size=.7,damp=.4,mix=.25 \
-  -m phaser.rate=.05..4 \
-  -m reverb.size=.2..0.95
-```
+### Use several telemetry sources
 
-Use more than one telemetry source by keeping one primary source bare and
-naming every additional source before the colon in a repeated `-m` clause:
+Keep the primary source at the start of the command and name additional
+sources on their mappings:
 
 ```bash
 stash cpu.usage \
@@ -134,51 +187,55 @@ stash cpu.usage \
   -m gpu.usage:syn.motion.gain=.02...2
 ```
 
-The bare `-m TARGET=MAP` form is shorthand for the primary `cpu.usage` source.
-Telemetry is control-rate data: it maps into synth/effect parameters but does
-not become an audio-rate oscillator signal. Use `syn.ID.out` on the left of the
-colon when one synth must modulate an audio-rate-capable parameter of another.
+The bare mapping uses the primary `cpu.usage` source. The other mappings read
+CPU temperature and GPU usage independently. Run `stash -l` first: optional
+hardware sources may not be available on every machine.
 
-Build an audio-rate modular patch while keeping the modulator silent in the
-master mix:
+### Feed STASH from another command
 
-```bash
-stash cpu.usage \
-  -s fm:motion,mix=0,ratio=.125,index=5 \
-  -s wavetable:voice,table=metal \
-  -m freq=45..120/exp~100ms \
-  -m syn.motion.out:syn.voice.position.mod=-.4...4 \
-  -f lp:3k -x drive:.2
-```
-
-Use newline-delimited numbers from stdin:
+Use `-` as the source and provide the expected input range:
 
 ```bash
 printf '0\n.25\n.5\n.75\n1\n' |
-stash - --range 0..1 -m freq=100..2k
+  stash - --range 0..1 -m freq=100..2k
 ```
 
-Press Ctrl-C to stop a live telemetry or audio command cleanly. Diagnostics go to stderr; telemetry data and raw audio never share stdout with status text.
+STASH accepts one finite number per non-empty input line, so scripts and Unix
+pipelines can become control sources.
 
-## Raw PCM
+### Stream raw audio
 
-`-o -` writes headerless audio to stdout with this fixed format:
-
-- 48,000 Hz
-- two channels
-- stereo interleaved
-- little-endian float32 samples
-
-For example:
+`-o -` writes headerless, stereo-interleaved, little-endian float32 PCM at
+48,000 Hz. For example, send it to PipeWire:
 
 ```bash
 stash cpu.usage -m freq=80..2k/exp~150ms -o - |
-pw-cat --playback --rate 48000 --channels 2 --format f32
+  pw-cat --playback --rate 48000 --channels 2 --format f32
 ```
+
+Diagnostics stay on stderr, so telemetry values and raw audio on stdout remain
+safe to pipe.
+
+## Command guide
+
+```text
+stash                         open the live editor
+stash SOURCE [OPTIONS]        read or sonify a source
+stash -l [PREFIX]             discover sources; use "syn" for synths
+stash -i NAME                 inspect a source or synth
+stash -p PRIMITIVE            resolve a note, scale, rhythm, or synth
+stash -h | --help             show the command summary
+```
+
+For the complete grammar and more ready-to-run patches, see:
+
+- [`SYNTAX.md`](SYNTAX.md) — authoritative command syntax and semantics
+- [`EXAMPLES.md`](EXAMPLES.md) — examples organized by capability
+- [`docs/stash.1`](docs/stash.1) — source for the installed `stash(1)` manual
 
 ## Development
 
-Run the release checks with:
+Run the project checks from the repository root:
 
 ```bash
 gofmt -w cmd internal
@@ -187,17 +244,6 @@ go vet ./...
 go build ./cmd/stash
 ```
 
-The bounded implementation loop and slice history are documented in [`TASKS.md`](TASKS.md).
-
-## Documentation
-
-- [`SYNTAX.md`](SYNTAX.md) — authoritative CLI syntax
-- [`EXAMPLES.md`](EXAMPLES.md) — command examples
-- [`docs/stash.1`](docs/stash.1) — installed `stash(1)` manual source
-- [`PLANNING.md`](PLANNING.md) — architecture and scope
-- [`AGENT.md`](AGENT.md) — engineering rules
-- [`TASKS.md`](TASKS.md) — implementation status and handoffs
-
 ## License
 
-The repository owner has not selected a license yet.
+No license has been selected yet.
