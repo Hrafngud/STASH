@@ -197,7 +197,11 @@ func (state *editor) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return state, pollRuntimeCmd()
 	case tea.KeyboardEnhancementsMsg:
-		state.enhancedKeys = message.SupportsKeyDisambiguation()
+		// Associated text or alternate-key reporting alone cannot distinguish
+		// Ctrl+M from Enter. Require disambiguation or canonical key encoding.
+		state.enhancedKeys = message.Flags&1 != 0 || message.SupportsAllKeysAsEscapeCodes()
+		return state, nil
+	case tea.KeyReleaseMsg:
 		return state, nil
 	}
 	if state.presetMode != presetClosed {
@@ -249,50 +253,46 @@ func (state *editor) importCommandPaste(content string) bool {
 }
 
 func (state *editor) updateKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key = printableKey(key)
-	state.message = ""
-	name := key.String()
-	if name == "ctrl+c" || !state.editing && (name == "q" || name == "esc") {
-		return state, tea.Quit
-	}
-	if name == "ctrl+shift+g" || name == "alt+g" {
-		state.openPresetPicker()
+	key = normalizeKey(key)
+	action := resolveShortcut(key, state.keyScope())
+	if key.IsRepeat && action != noAction && !action.repeats() {
 		return state, nil
 	}
-	if name == "ctrl+g" {
+	state.message = ""
+	switch action {
+	case quitAction:
+		return state, tea.Quit
+	case loadAction:
+		state.openPresetPicker()
+		return state, nil
+	case saveAction:
 		if state.analysis.State != Valid {
 			state.message = "finish the instrument before saving a preset"
 			return state, nil
 		}
 		state.openPresetSave()
 		return state, nil
-	}
-	if name == "ctrl+m" || name == "alt+m" {
+	case muteAction:
 		state.toggleMute()
 		return state, nil
-	}
-	if name == "ctrl+o" {
+	case oscillatorAction:
 		state.oscillator = !state.oscillator
 		return state, nil
-	}
-	if name == "ctrl+shift+d" || name == "alt+d" {
+	case deleteClauseAction:
 		state.deleteActive()
 		return state, nil
-	}
-	if state.editing && name == "ctrl+d" {
+	case doneAction:
 		state.finishEditing()
 		return state, nil
-	}
-	if name == "ctrl+n" {
+	case insertBelowAction:
 		return state, state.insert(state.active + 1)
-	}
-	if name == "ctrl+p" {
+	case insertAboveAction:
 		return state, state.insert(state.active)
 	}
 	if state.editing {
-		return state, state.updateEdit(key)
+		return state, state.updateEdit(key, action)
 	}
-	return state, state.updateNormal(name)
+	return state, state.updateNormal(action)
 }
 
 func (state *editor) openPresetSave() {
@@ -340,24 +340,27 @@ func (state *editor) updatePreset(message tea.Msg) tea.Cmd {
 		}
 		return nil
 	}
-	key = printableKey(key)
-	name := key.String()
-	if name == "esc" || name == "ctrl+c" {
+	key = normalizeKey(key)
+	action := resolveShortcut(key, state.keyScope())
+	if key.IsRepeat && action != noAction && !action.repeats() {
+		return nil
+	}
+	if action == cancelAction {
 		state.message = "preset action cancelled"
 		return state.closePreset()
 	}
 
 	if state.presetMode == presetLoading {
-		switch name {
-		case "up", "k", "shift+tab":
+		switch action {
+		case previousAction:
 			if len(state.presets) > 0 {
 				state.presetSelected = (state.presetSelected - 1 + len(state.presets)) % len(state.presets)
 			}
-		case "down", "j", "tab":
+		case nextAction:
 			if len(state.presets) > 0 {
 				state.presetSelected = (state.presetSelected + 1) % len(state.presets)
 			}
-		case "enter":
+		case acceptAction:
 			if len(state.presets) == 0 {
 				return nil
 			}
@@ -378,7 +381,7 @@ func (state *editor) updatePreset(message tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	if name == "enter" {
+	if action == acceptAction {
 		presetName, err := presetName(state.presetInput.Value())
 		if err != nil {
 			state.message = err.Error()
@@ -417,45 +420,43 @@ func (state *editor) updatePreset(message tea.Msg) tea.Cmd {
 	return command
 }
 
-func (state *editor) updateNormal(key string) tea.Cmd {
-	switch key {
-	case "up", "k":
+func (state *editor) updateNormal(action keyAction) tea.Cmd {
+	switch action {
+	case previousAction:
 		if state.active > 0 {
 			state.active--
 		}
-	case "down", "j":
+	case nextAction:
 		if state.active+1 < len(state.lines) {
 			state.active++
 		}
-	case "enter", "e":
+	case editAction:
 		return state.startEditing()
-	case "ctrl+up":
+	case moveUpAction:
 		if state.active > 0 {
 			state.lines[state.active], state.lines[state.active-1] = state.lines[state.active-1], state.lines[state.active]
 			state.active--
 			state.refresh(true)
 		}
-	case "ctrl+down":
+	case moveDownAction:
 		if state.active+1 < len(state.lines) {
 			state.lines[state.active], state.lines[state.active+1] = state.lines[state.active+1], state.lines[state.active]
 			state.active++
 			state.refresh(true)
 		}
-	case "a", "o":
-		return state.insert(state.active + 1)
 	}
 	return nil
 }
 
-func (state *editor) updateEdit(key tea.KeyPressMsg) tea.Cmd {
-	switch key.String() {
-	case "up", "shift+tab":
+func (state *editor) updateEdit(key tea.KeyPressMsg, action keyAction) tea.Cmd {
+	switch action {
+	case previousAction:
 		state.selectSuggestion(-1)
 		return nil
-	case "down", "tab":
+	case nextAction:
 		state.selectSuggestion(1)
 		return nil
-	case "enter":
+	case acceptAction:
 		if len(state.suggestions) == 0 {
 			state.finishEditing()
 			return nil
@@ -467,41 +468,41 @@ func (state *editor) updateEdit(key tea.KeyPressMsg) tea.Cmd {
 		state.selected = 0
 		state.refresh(true)
 		return nil
-	case "alt+up":
+	case nudgeUpAction:
 		state.nudge(1)
 		return nil
-	case "alt+down":
+	case nudgeDownAction:
 		state.nudge(-1)
 		return nil
-	case "left", "right":
+	case cursorLeftAction, cursorRightAction:
 		if token, ok := state.currentChosenNumber(); ok {
 			state.numberChosen = false
-			if key.String() == "left" {
+			if action == cursorLeftAction {
 				state.input.SetCursor(token.start)
 			} else {
 				state.input.SetCursor(token.end)
 			}
 			return nil
 		}
-	case "alt+left":
+	case numberLeftAction:
 		state.selectNumber(-1)
 		return nil
-	case "alt+right":
+	case numberRightAction:
 		state.selectNumber(1)
 		return nil
-	case "home", "end", "ctrl+a", "ctrl+e", "ctrl+b", "ctrl+f", "ctrl+left", "ctrl+right":
+	case cursorMoveAction:
 		state.numberChosen = false
 	}
 
 	before := state.input.Value()
 	if state.numberChosen {
-		switch key.String() {
-		case "backspace", "delete":
+		switch action {
+		case deleteNumberAction:
 			state.removeChosenNumber()
 			state.lines[state.active] = state.input.Value()
 			state.refresh(true)
 			return nil
-		case "ctrl+v":
+		case pasteAction:
 			state.removeChosenNumber()
 		default:
 			if key.Text != "" {
@@ -645,24 +646,14 @@ func (state *editor) pollRuntime() bool {
 func (state *editor) View() tea.View {
 	view := tea.NewView(state.render())
 	view.AltScreen = true
+	// Bubble Tea always requests key disambiguation. Canonical key reporting
+	// provides repeats for Enter/Tab too; associated text preserves typed text
+	// and IME input independently of the codes used for shortcut dispatch.
+	view.KeyboardEnhancements.ReportAlternateKeys = true
+	view.KeyboardEnhancements.ReportEventTypes = true
 	view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 	view.KeyboardEnhancements.ReportAssociatedText = true
 	return view
-}
-
-func printableKey(key tea.KeyPressMsg) tea.KeyPressMsg {
-	modified := tea.ModCtrl | tea.ModAlt | tea.ModMeta | tea.ModHyper | tea.ModSuper
-	if key.Text != "" || key.Mod&modified != 0 {
-		return key
-	}
-	code := key.Code
-	if key.Mod.Contains(tea.ModShift) && key.ShiftedCode != 0 {
-		code = key.ShiftedCode
-	}
-	if code >= ' ' && code <= '~' {
-		key.Text = string(code)
-	}
-	return key
 }
 
 func (state *editor) render() string {
@@ -1074,13 +1065,9 @@ func (state *editor) detailMessage() string {
 func (state *editor) helpView(width int) string {
 	pairs := state.shortcutPairs()
 	if width < 60 {
-		muteKey, deleteKey, presetsKey := "alt+m", "alt+d", "alt+g"
-		if state.enhancedKeys {
-			muteKey, deleteKey, presetsKey = "ctrl+m", "ctrl+shift+d", "ctrl+shift+g"
-		}
-		pairs = [][2]string{{"↑↓", "select"}, {"enter", "edit"}, {"ctrl+o", "osc"}, {"ctrl+g", "save"}, {presetsKey, "presets"}, {"q", "quit"}}
+		pairs = [][2]string{{"↑↓", "select"}, {state.shortcutHint(editAction), "edit"}, {state.shortcutHint(oscillatorAction), "osc"}, {state.shortcutHint(saveAction), "save"}, {state.shortcutHint(loadAction), "presets"}, {"q", "quit"}}
 		if state.editing {
-			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {"ctrl+d", "done"}, {"ctrl+o", "osc"}, {deleteKey, "delete"}, {muteKey, "mute"}}
+			pairs = [][2]string{{"alt+←→/↑↓", "select/nudge"}, {state.shortcutHint(doneAction), "done"}, {state.shortcutHint(oscillatorAction), "osc"}, {state.shortcutHint(deleteClauseAction), "delete"}, {state.shortcutHint(muteAction), "mute"}}
 		}
 	}
 	parts := make([]string, 0, len(pairs))
@@ -1091,19 +1078,15 @@ func (state *editor) helpView(width int) string {
 }
 
 func (state *editor) shortcutPairs() [][2]string {
-	muteKey, deleteKey, presetsKey := "alt+m", "alt+d", "alt+g"
-	if state.enhancedKeys {
-		muteKey, deleteKey, presetsKey = "ctrl+m", "ctrl+shift+d", "ctrl+shift+g"
-	}
 	pairs := [][2]string{
-		{"↑↓", "select"}, {"enter", "edit"}, {"a", "add"}, {deleteKey, "delete"},
-		{"ctrl+o", "oscillator"}, {muteKey, "mute"}, {"ctrl+g", "save preset"}, {presetsKey, "load preset"}, {"q", "quit"},
+		{"↑↓", "select"}, {state.shortcutHint(editAction), "edit"}, {"a", "add"}, {state.shortcutHint(deleteClauseAction), "delete"},
+		{state.shortcutHint(oscillatorAction), "oscillator"}, {state.shortcutHint(muteAction), "mute"}, {state.shortcutHint(saveAction), "save preset"}, {state.shortcutHint(loadAction), "load preset"}, {"q", "quit"},
 	}
 	if state.editing {
 		pairs = [][2]string{
 			{"type", "change"}, {"tab/↑↓", "choose"}, {"enter", "accept"},
-			{"alt+←→", "value"}, {"alt+↑↓", "nudge"}, {"ctrl+d", "done"},
-			{"ctrl+o", "oscillator"}, {muteKey, "mute"},
+			{"alt+←→", "value"}, {"alt+↑↓", "nudge"}, {state.shortcutHint(doneAction), "done"},
+			{state.shortcutHint(oscillatorAction), "oscillator"}, {state.shortcutHint(muteAction), "mute"},
 		}
 	}
 	return pairs

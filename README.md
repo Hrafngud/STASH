@@ -161,11 +161,23 @@ Useful controls:
 | `a` or `Ctrl+N` | Add a clause below |
 | `Tab` | Cycle context-aware suggestions while editing |
 | `Alt+Up` / `Alt+Down` | Nudge the selected numeric value |
-| `Ctrl+M` | Mute or unmute |
+| `Ctrl+D` | Finish editing a clause |
+| `Ctrl+M` / `Alt+M` | Mute or unmute |
+| `Ctrl+Shift+D` / `Alt+D` | Delete the selected clause |
 | `Ctrl+O` | Toggle the ASCII oscillator display |
 | `Ctrl+G` | Save the current instrument as a preset |
-| `Ctrl+Shift+G` | Load a preset |
+| `Ctrl+Shift+G` / `Alt+G` | Load a preset |
 | `q` or `Ctrl+C` | Quit |
+
+The shortcut panel follows the terminal's keyboard capabilities. `Ctrl+M`
+and `Ctrl+Shift` bindings require enhanced keyboard reporting: legacy terminals
+send `Ctrl+M` as Enter and cannot distinguish `Ctrl+Shift+D` from `Ctrl+D`.
+The existing Alt bindings work with legacy input. Application shortcuts take
+precedence over the text editor; preset dialogs use their own bindings.
+On terminals that report repeat events, holding a toggle or clause deletion
+key performs the action once, while navigation and numeric nudges keep repeating.
+If a shortcut invokes a desktop or terminal action, configure that layer to
+pass the key through to STASH; the TUI only receives keys forwarded to it.
 
 Presets are readable `.stash` commands stored in
 `$XDG_CONFIG_HOME/stash/presets`, or `~/.config/stash/presets` by default. You

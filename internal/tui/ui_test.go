@@ -212,8 +212,11 @@ func TestEditorLegacyTerminalFallbackShortcuts(t *testing.T) {
 		t.Fatal("enhanced shortcut is missing from help")
 	}
 	view := state.View()
+	if !view.KeyboardEnhancements.ReportAlternateKeys || !view.KeyboardEnhancements.ReportEventTypes {
+		t.Fatal("view does not request alternate key codes and repeat events")
+	}
 	if !view.KeyboardEnhancements.ReportAllKeysAsEscapeCodes || !view.KeyboardEnhancements.ReportAssociatedText {
-		t.Fatal("view does not request enhanced keys with their associated text")
+		t.Fatal("view does not request canonical key reporting with associated text")
 	}
 }
 
@@ -380,6 +383,11 @@ func TestRunRestoresScreenAfterQuit(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "\x1b[?1049l") {
 		t.Fatalf("Bubble Tea did not restore the primary screen: %q", output.String())
+	}
+	for _, sequence := range []string{"\x1b[>31u", "\x1b[<1u", "\x1b[>4m"} {
+		if !strings.Contains(output.String(), sequence) {
+			t.Fatalf("keyboard mode setup/restoration missing %q", sequence)
+		}
 	}
 }
 
